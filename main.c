@@ -6,6 +6,7 @@
 #include <syslog.h>
 #include <arpa/inet.h>
 #include <errno.h>
+#include <time.h>
 
 
 #include "utils.h"
@@ -13,6 +14,7 @@
 
 #define BACKLOG 10  // server tcp listen backlog
 #define MAX_TUNNEL_CONNECTIONS 20
+#define SUBFLOW_INIT_DEADLINE_SECONDS 10  // drop subflows which haven't entered READY state in that time
 
 int quit = 0;
 void sighandler(int p) {
@@ -89,43 +91,52 @@ int server_accept_client(int server_tcp_sock_fd) {
 }
 
 
-void add_subflow(int *active_tcp_conns_fd, int *active_tcp_conns_count, int new_fd) {
-    if (*active_tcp_conns_count >= MAX_TUNNEL_CONNECTIONS) {
+void add_subflow(subflow_state *active_subflows_state, int *active_subflows_count, subflow_state *new_subflow) {
+    if (*active_subflows_count >= MAX_TUNNEL_CONNECTIONS) {
         fprintf(stderr, "Assertion error. Tried to add more connections than expected\n");
         exit(1);
     }
 
-    active_tcp_conns_fd[(*active_tcp_conns_count)++] = new_fd;
+    memcpy(new_subflow, &active_subflows_state[(*active_subflows_count)++], sizeof(subflow_state));
 }
 
-void remove_subflow(int *active_tcp_conns_fd, int *active_tcp_conns_count, int delete_fd) {
+void remove_subflow(subflow_state *active_subflows_state, int *active_subflows_count, int delete_fd) {
     int pos;
-    for (pos = 0; pos < *active_tcp_conns_count; pos++) {
-        if (active_tcp_conns_fd[pos] == delete_fd)
+    for (pos = 0; pos < *active_subflows_count; pos++) {
+        if (active_subflows_state[pos].sock_fd == delete_fd)
             break;
     }
-    if (pos >= *active_tcp_conns_count)
+    if (pos >= *active_subflows_count)
         return; // not found
 
-    for (; pos + 1 < *active_tcp_conns_count; pos++) {
-        active_tcp_conns_fd[pos] = active_tcp_conns_fd[pos + 1];
+    for (; pos + 1 < *active_subflows_count; pos++) {
+        active_subflows_state[pos] = active_subflows_state[pos + 1];
     }
-    active_tcp_conns_fd[--(*active_tcp_conns_count)] = -1;
+
+    --(*active_subflows_count);
 }
 
+void grow_subflows(subflow_state *active_subflows_state, int *active_subflows_count,
+                   int desired_subflows_count, char * client_proxy, char * client_dest) {
 
-void run_forever(int udp_local_listen, int is_client, const char * server_listen, const char * shared_secret) {
+    // todo  !!!!!!! connect via proxies to the dest
+}
+
+void run_forever(int udp_local_listen, int is_client, const char * server_listen,
+                 const char * shared_secret,
+                 int client_conenctions, char * client_proxy, char * client_dest) {
     uint32_t active_tunnel_id = secure_random();
-    uint32_t latest_subflow_id = 0;
-    int *active_tcp_conns_fd = (int *) malloc(sizeof(int) * MAX_TUNNEL_CONNECTIONS);
-    int active_tcp_conns_count = 0;
+    subflow_state *active_subflows_state = (subflow_state *) malloc(sizeof(subflow_state) * MAX_TUNNEL_CONNECTIONS);
+    int active_subflows_count = 0;
 
     int server_tcp_sock_fd;
 
     if (!is_client)
         server_tcp_sock_fd = bind_server_tcp_socket(server_listen);
 
-    // todo client grow
+    if (is_client) {
+        grow_subflows(active_subflows_state, &active_subflows_count, client_conenctions, client_proxy, client_dest);
+    }
 
     int local_udp_sock_fd = bind_local_udp(udp_local_listen);
 
@@ -146,17 +157,22 @@ void run_forever(int udp_local_listen, int is_client, const char * server_listen
             maxfd = MAX(maxfd, server_tcp_sock_fd);
         }
 
-        for (int i = 0; i < active_tcp_conns_count; i++) {
-            FD_SET(active_tcp_conns_fd[i], &readfds);
-            FD_SET(active_tcp_conns_fd[i], &errorfds);
-            maxfd = MAX(maxfd, active_tcp_conns_fd[i]);
+        for (int i = 0; i < active_subflows_count; i++) {
+            FD_SET(active_subflows_state[i].sock_fd, &readfds);
+            FD_SET(active_subflows_state[i].sock_fd, &errorfds);
+            maxfd = MAX(maxfd, active_subflows_state[i].sock_fd);
         }
 
         if (select(maxfd + 1, &readfds, 0, &errorfds, 0) < 0) {
             die("ERROR in select", errno);
         }
 
-        // todo local_udp_sock_fd
+        if (FD_ISSET(local_udp_sock_fd, &readfds)) {
+            // todo choose free alive subflow + send UDP
+        }
+        if (FD_ISSET(local_udp_sock_fd, &errorfds)) {
+            die("Local UDP listening socket has failed", errno);
+        }
 
         /**
          * Accept new TCP subflows on the server TCP listening socket
@@ -164,15 +180,12 @@ void run_forever(int udp_local_listen, int is_client, const char * server_listen
         if (!is_client) {
             if (FD_ISSET(server_tcp_sock_fd, &readfds)) {
                 int childfd = server_accept_client(server_tcp_sock_fd);
-                if (active_tcp_conns_count >= MAX_TUNNEL_CONNECTIONS) {  // drop extra connections
+                if (active_subflows_count >= MAX_TUNNEL_CONNECTIONS) {  // drop extra connections
                     close(childfd);
                 } else {
-                    if (accept_subflow(childfd, &active_tunnel_id, active_tcp_conns_count > 0,
-                                       &latest_subflow_id, shared_secret)) {
-                        add_subflow(active_tcp_conns_fd, &active_tcp_conns_count, childfd);
-                    } else {
-                        close(childfd);
-                    }
+                    subflow_state * new_subflow = accept_subflow(childfd);
+                    add_subflow(active_subflows_state, &active_subflows_count, new_subflow);
+                    free(new_subflow);
                 }
             }
             if (FD_ISSET(server_tcp_sock_fd, &errorfds)) {
@@ -180,14 +193,33 @@ void run_forever(int udp_local_listen, int is_client, const char * server_listen
             }
         }
 
-        if (is_client) {
-            // todo grow if needed
+        for (int i = active_subflows_count - 1; i >= 0; i--) {  // reversed to be able to delete subflows
+
+            if (FD_ISSET(active_subflows_state[i].sock_fd, &errorfds)) {
+                syslog(LOG_INFO, "Subflow died");
+                close(active_subflows_state[i].sock_fd);
+                remove_subflow(active_subflows_state, &active_subflows_count, active_subflows_state[i].sock_fd);
+                continue;
+            }
+
+            if (FD_ISSET(active_subflows_state[i].sock_fd, &readfds)) {
+                // todo read from subflow - either state update or new datagram
+            }
+
+            if (active_subflows_state[i].state != SS_READY) {
+                // drop hang subflows
+                if (clock() - active_subflows_state[i].connect_clock > SUBFLOW_INIT_DEADLINE_SECONDS) {
+                    close(active_subflows_state[i].sock_fd);
+                    remove_subflow(active_subflows_state, &active_subflows_count, active_subflows_state[i].sock_fd);
+                }
+            }
         }
 
-        // todo read connected sockets pool
-
+        if (is_client) {
+            grow_subflows(active_subflows_state, &active_subflows_count, client_conenctions, client_proxy, client_dest);
+        }
     }
-    free(active_tcp_conns_fd);
+    free(active_subflows_state);
 }
 
 void print_help(char **argv) {
@@ -201,7 +233,7 @@ void print_help(char **argv) {
     fprintf(stderr, "\t-s  [<laddr>:]<lport> Server mode.\n");
     fprintf(stderr, "\t-k  <shared_secret> Common shared secret between client and server.\n");
     fprintf(stderr, "\t-n  <client_connection_number> Number of TCP connections to maintain (not more than %d).\n", MAX_TUNNEL_CONNECTIONS);
-    fprintf(stderr, "\t-p  <client_proxy_host>:<client_proxy_port> HTTP proxy to connect via.\n");
+    fprintf(stderr, "\t-p  <client_proxy_host>:<client_proxy_port> HTTP proxy to connect via (if needed).\n");
     fprintf(stderr, "\t-h  Print this help.\n");
 }
 
@@ -262,10 +294,6 @@ int main(int argc, char **argv) {
             fprintf(stderr, "-n can't be more than %d\n", MAX_TUNNEL_CONNECTIONS);
             help = 1;
         }
-        if (client_proxy == NULL) {
-            fprintf(stderr, "-p is required\n");
-            help = 1;
-        }
     }
 
     if (help >= 0) {
@@ -278,7 +306,9 @@ int main(int argc, char **argv) {
     signal(SIGTERM, &sighandler);
     signal(SIGHUP, &sighandler);
 
-    run_forever(udp_local_listen, is_client, server_listen, shared_secret);
+    run_forever(udp_local_listen, is_client, server_listen,
+                shared_secret,
+                client_conenctions, client_proxy, client_dest);
 
     free(shared_secret);
     free(client_proxy);
