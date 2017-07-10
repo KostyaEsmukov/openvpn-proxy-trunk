@@ -5,12 +5,9 @@
 #include <string.h>
 #include <syslog.h>
 #include <arpa/inet.h>
-#include <sys/socket.h>
-#include <fcntl.h>
 #include <errno.h>
-#include <netdb.h>
 
-# define MIN(a, b)		((a) < (b) ? (a) : (b))
+#include "utils.h"
 
 #define BACKLOG 10  // server tcp listen backlog
 
@@ -24,58 +21,6 @@ void sighandler(int p) {
     quit++;
 }
 
-void die(const char * msg, int errno_) {
-    fprintf(stderr, "%s\n", msg);
-    if (errno_ > 0)
-        fprintf(stderr, "%s\n", strerror(errno_));
-    exit(1);
-}
-
-
-void set_noblock(int sock_fd) {
-    int flags;
-    if ((flags = fcntl(sock_fd, F_GETFL, 0)) < 0) {
-        die("get flags", errno);
-    }
-    if (fcntl(sock_fd, F_SETFL, flags & ~O_NONBLOCK) < 0) {
-        die("set blocking", errno);
-    }
-}
-
-/*
- * gethostbyname() wrapper. Return 1 if OK, otherwise 0.
- *
- * from cntlm
- */
-int so_resolv(struct in_addr *host, const char *name) {
-
-    struct addrinfo hints, *res, *p;
-
-    memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_INET;
-    hints.ai_socktype = SOCK_STREAM;
-    int rc = getaddrinfo(name, NULL, &hints, &res);
-    if (rc != 0) {
-        syslog(LOG_INFO, "so_resolv: %s failed (%d: %s)\n", name, rc, gai_strerror(rc));
-        return 0;
-    }
-    int addr_set = 0;
-    for (p = res; p != NULL; p = p->ai_next) {
-        struct sockaddr_in *ad = (struct sockaddr_in*)(p->ai_addr);
-        if (ad == NULL) {
-            freeaddrinfo(res);
-            return 0;
-        }
-        if (!addr_set) {
-            memcpy(host, &ad->sin_addr, p->ai_addrlen);
-            addr_set = 1;
-        }
-    }
-
-    freeaddrinfo(res);
-
-    return 1;
-}
 
 int bind_local_udp(int port) {
     struct sockaddr_in si_bind;
@@ -96,65 +41,6 @@ int bind_local_udp(int port) {
     return sock_fd;
 }
 
-/*
- * Shortcut for malloc/memset zero.
- */
-char *new(size_t size) {
-    char *tmp;
-
-    tmp = malloc(size);
-    memset(tmp, 0, size);
-
-    return tmp;
-}
-
-/*
- * Standard substr. To prevent modification of the source
- * (terminating \x0), return the result in a new memory.
- */
-char *substr(const char *src, int pos, int len) {
-    int l;
-    char *tmp;
-
-    if (len == 0)
-        len = strlen(src);
-
-    l = MIN(len, strlen(src) - pos);
-    if (l <= 0) {
-        return new(1);
-    }
-
-    tmp = new(l + 1);
-    strlcpy(tmp, src + pos, l + 1);
-
-    return tmp;
-}
-
-int resolve_host(const char * host, struct in_addr * addr, in_port_t * port) {
-    int len, p;
-    char * addr_str;
-
-    len = strlen(host);
-    p = strcspn(host, ":");
-    if (p < len-1) {
-        addr_str = substr(host, 0, p);
-        if (!so_resolv(addr, addr_str)) {
-            syslog(LOG_ERR, "Cannot resolve address %s\n", addr_str);
-            return 0;
-        }
-        free(addr_str);
-        *port = atoi(host+p+1);
-    } else {
-        addr->s_addr = htonl(INADDR_ANY);
-        *port = atoi(host);
-    }
-
-    if (!*port) {
-        fprintf(stderr, "Invalid port %s.", host);
-        exit(1);
-    }
-    return 1;
-}
 
 
 void init_client() {
