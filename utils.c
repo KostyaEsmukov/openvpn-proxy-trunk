@@ -144,6 +144,19 @@ ssize_t readexactly(int fd, void *buf, size_t nbyte) {
     return buf_pos;
 }
 
+ssize_t sendexactly(int fd, void *buf, size_t nbyte) {
+    ssize_t i;
+    ssize_t buf_pos = 0;
+
+    do {
+        if ((i = send(fd, buf + buf_pos, nbyte - buf_pos, 0)) < 0) {
+            return i;
+        }
+        buf_pos += i;
+    } while (buf_pos < nbyte);
+    return buf_pos;
+}
+
 
 uint32_t secure_random() {
     // Linux http://man7.org/linux/man-pages/man2/getrandom.2.html

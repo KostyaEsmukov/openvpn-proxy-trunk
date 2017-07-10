@@ -8,13 +8,14 @@
 #include <errno.h>
 #include <time.h>
 
-
 #include "utils.h"
 #include "prot.h"
+#include "connect.h"
 
 #define BACKLOG 10  // server tcp listen backlog
 #define MAX_TUNNEL_CONNECTIONS 20
 #define SUBFLOW_INIT_DEADLINE_SECONDS 10  // drop subflows which haven't entered READY state in that time
+#define GROW_DELAY_AFTER_FAIL_SECONDS 5
 
 int quit = 0;
 void sighandler(int p) {
@@ -117,9 +118,53 @@ void remove_subflow(subflow_state *active_subflows_state, int *active_subflows_c
 }
 
 void grow_subflows(subflow_state *active_subflows_state, int *active_subflows_count,
-                   int desired_subflows_count, char * client_proxy, char * client_dest) {
+                   int desired_subflows_count, char * client_proxy, char * client_dest,
+                   clock_t *last_fail) {
 
-    // todo  !!!!!!! connect via proxies to the dest
+    if (*active_subflows_count >= desired_subflows_count)
+        return;
+
+    if (clock() - *last_fail < GROW_DELAY_AFTER_FAIL_SECONDS) {
+        return;
+    }
+
+    struct sockaddr_in si;
+    memset(&si, 0, sizeof(si));
+    si.sin_family = AF_INET;
+
+    if (client_proxy != NULL) {
+        if (!resolve_host(client_proxy, &si.sin_addr, &si.sin_port)) {
+            syslog(LOG_WARNING, "Unable to resolve proxy address (%d: %s)", errno, strerror(errno));
+            *last_fail = clock();
+            return;
+        }
+    } else {
+        if (!resolve_host(client_dest, &si.sin_addr, &si.sin_port)) {
+            syslog(LOG_WARNING, "Unable to resolve destination address (%d: %s)", errno, strerror(errno));
+            *last_fail = clock();
+            return;
+        }
+    }
+
+    for (int i = 0; i < desired_subflows_count - *active_subflows_count; i++) {
+        int childfd;
+        if (client_proxy != NULL) {
+            childfd = connect_via_proxy(si, client_dest);
+        } else {
+            childfd = connect_directly(si);
+        }
+        if (childfd < 0) {
+            syslog(LOG_WARNING, "Unable to connect to dest (%d: %s)", errno, strerror(errno));
+            *last_fail = clock();
+            return;
+        }
+        subflow_state * new_subflow = accept_subflow(childfd);
+        if (client_proxy != NULL) {
+            new_subflow->state = SS_PROXY_RESPONSE_WAITING;
+        }
+        add_subflow(active_subflows_state, active_subflows_count, new_subflow);
+        free(new_subflow);
+    }
 }
 
 void run_forever(int udp_local_listen, int is_client, const char * server_listen,
@@ -128,6 +173,7 @@ void run_forever(int udp_local_listen, int is_client, const char * server_listen
     uint32_t active_tunnel_id = secure_random();
     subflow_state *active_subflows_state = (subflow_state *) malloc(sizeof(subflow_state) * MAX_TUNNEL_CONNECTIONS);
     int active_subflows_count = 0;
+    clock_t last_fail = clock() - GROW_DELAY_AFTER_FAIL_SECONDS - 1;
 
     int server_tcp_sock_fd;
 
@@ -135,7 +181,7 @@ void run_forever(int udp_local_listen, int is_client, const char * server_listen
         server_tcp_sock_fd = bind_server_tcp_socket(server_listen);
 
     if (is_client) {
-        grow_subflows(active_subflows_state, &active_subflows_count, client_conenctions, client_proxy, client_dest);
+        grow_subflows(active_subflows_state, &active_subflows_count, client_conenctions, client_proxy, client_dest, &last_fail);
     }
 
     int local_udp_sock_fd = bind_local_udp(udp_local_listen);
@@ -216,7 +262,7 @@ void run_forever(int udp_local_listen, int is_client, const char * server_listen
         }
 
         if (is_client) {
-            grow_subflows(active_subflows_state, &active_subflows_count, client_conenctions, client_proxy, client_dest);
+            grow_subflows(active_subflows_state, &active_subflows_count, client_conenctions, client_proxy, client_dest, &last_fail);
         }
     }
     free(active_subflows_state);

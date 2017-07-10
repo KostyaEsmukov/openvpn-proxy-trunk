@@ -81,7 +81,7 @@ struct udp_datagram_header {
 // local state
 
 enum ss_state {
-    SS_UNK, SS_GREETED, SS_READY
+    SS_PROXY_RESPONSE_WAITING, SS_UNK, SS_GREETED, SS_READY
 };
 typedef enum ss_state ss_state;
 
