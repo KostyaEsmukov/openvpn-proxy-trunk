@@ -3,5 +3,10 @@ project(openvpn_proxy_trunk)
 
 set(CMAKE_CXX_STANDARD 11)
 
-set(SOURCE_FILES utils.c main.c)
+find_package(openssl REQUIRED)
+include_directories(${OPENSSL_INCLUDE_DIR})
+
+set(SOURCE_FILES utils.c prot.c main.c)
 add_executable(openvpn_proxy_trunk ${SOURCE_FILES})
+
+target_link_libraries(openvpn_proxy_trunk ${OPENSSL_LIBRARIES})

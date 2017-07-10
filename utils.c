@@ -10,6 +10,8 @@
 #include <errno.h>
 #include <string.h>
 #include <syslog.h>
+#include <unistd.h>
+
 
 #include "utils.h"
 
@@ -127,4 +129,36 @@ int resolve_host(const char * host, struct in_addr * addr, in_port_t * port) {
         exit(1);
     }
     return 1;
+}
+
+ssize_t readexactly(int fd, void *buf, size_t nbyte) {
+    ssize_t i;
+    ssize_t buf_pos = 0;
+
+    do {
+        if ((i = read(fd, buf + buf_pos, nbyte - buf_pos)) < 0) {
+            return i;
+        }
+        buf_pos += i;
+    } while (buf_pos < nbyte);
+    return buf_pos;
+}
+
+
+uint32_t secure_random() {
+    // Linux http://man7.org/linux/man-pages/man2/getrandom.2.html
+    // BSD http://man.openbsd.org/cgi-bin/man.cgi/OpenBSD-current/man3/arc4random.3?query=arc4random%26sec=3
+
+    int fd = open("/dev/urandom", O_RDONLY);
+    uint32_t res = 0;
+    size_t pos = 0;
+    while (pos < sizeof(uint32_t)) {
+        ssize_t result = read(fd, &res + pos, (sizeof res) - pos);
+        if (result < 0) {
+            die("Unable to dead from /dev/urandom", errno);
+        }
+        pos += result;
+    }
+    close(fd);
+    return res;
 }
