@@ -7,6 +7,7 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <time.h>
+#include <netdb.h>
 
 #include "utils.h"
 #include "prot.h"
@@ -28,7 +29,9 @@ void sighandler(int p) {
 }
 
 void grow_subflows(subflow_state *active_subflows_state, int *active_subflows_count,
-                   int desired_subflows_count, char *client_proxy, char *client_dest,
+                   int desired_subflows_count,
+                   const char *client_proxy, const char *client_dest,
+                   struct addrinfo * ai,
                    clock_t *last_fail) {
 
     if (*active_subflows_count >= desired_subflows_count)
@@ -38,30 +41,28 @@ void grow_subflows(subflow_state *active_subflows_state, int *active_subflows_co
         return;
     }
 
-    struct sockaddr_in si;
-    memset(&si, 0, sizeof(si));
-    si.sin_family = AF_INET;
-
-    if (client_proxy != NULL) {
-        if (!resolve_host(client_proxy, &si.sin_addr, &si.sin_port)) {
-            syslog(LOG_WARNING, "Unable to resolve proxy address (%d: %s)", errno, strerror(errno));
-            *last_fail = clock();
-            return;
-        }
-    } else {
-        if (!resolve_host(client_dest, &si.sin_addr, &si.sin_port)) {
-            syslog(LOG_WARNING, "Unable to resolve destination address (%d: %s)", errno, strerror(errno));
-            *last_fail = clock();
-            return;
+    if (ai->ai_addrlen == 0) {  // not resolved yet
+        if (client_proxy != NULL) {
+            if (!resolve_dest_to_ai(client_proxy, ai, SOCK_STREAM)) {
+                syslog(LOG_WARNING, "Unable to resolve proxy address (%d: %s)", errno, strerror(errno));
+                *last_fail = clock();
+                return;
+            }
+        } else {
+            if (!resolve_dest_to_ai(client_dest, ai, SOCK_STREAM)) {
+                syslog(LOG_WARNING, "Unable to resolve destination address (%d: %s)", errno, strerror(errno));
+                *last_fail = clock();
+                return;
+            }
         }
     }
 
     for (int i = 0; i < desired_subflows_count - *active_subflows_count; i++) {
         int childfd;
         if (client_proxy != NULL) {
-            childfd = connect_via_proxy(si, client_dest);
+            childfd = connect_via_proxy(ai, client_dest);
         } else {
-            childfd = connect_directly(si);
+            childfd = connect_directly(ai);
         }
         if (childfd < 0) {
             syslog(LOG_WARNING, "Unable to connect to dest (%d: %s)", errno, strerror(errno));
@@ -101,26 +102,25 @@ int write_outgoing_datagram(char *buf, ssize_t len,
     return 0;
 }
 
-void run_forever(int udp_local_listen, char *udp_local_dest,
+void run_forever(const char * udp_local_listen, const char *udp_local_dest,
                  int is_client, const char *server_listen,
                  const char *shared_secret,
-                 int client_conenctions, char *client_proxy, char *client_dest) {
+                 int client_conenctions,
+                 const char *client_proxy, const char *client_dest) {
     uint32_t active_tunnel_id = secure_random();
+
     subflow_state *active_subflows_state = (subflow_state *) malloc(sizeof(subflow_state) * MAX_TUNNEL_CONNECTIONS);
     int active_subflows_count = 0;
     clock_t last_fail = clock() - GROW_DELAY_AFTER_FAIL_SECONDS - 1;
     int last_write_subflow = 0;
+
     char *udp_buf = (char *) malloc(BUFSIZE_UDP);
-    struct sockaddr_in udp_client;
-    socklen_t udp_client_len = 0;
+    struct addrinfo udp_server_ai;  // used for resolving dest UDP
+    struct sockaddr_storage udp_client;  // stored only once.
+    socklen_t udp_client_len = 0;  // 0 - unknown yet
 
-    if (udp_local_dest != NULL) {
-        udp_client.
-        if (!resolve_host(client_proxy, &si.sin_addr, &si.sin_port)) {
-            die("Unable to resolve local UDP dest host", errno);
-        }
-    }
-
+    struct addrinfo tcp_client;  // stored only once.
+    memset(&tcp_client, 0, sizeof(struct addrinfo));
     int server_tcp_sock_fd;
 
     if (!is_client)
@@ -129,10 +129,20 @@ void run_forever(int udp_local_listen, char *udp_local_dest,
     if (is_client) {
         grow_subflows(active_subflows_state, &active_subflows_count,
                       client_conenctions,
-                      client_proxy, client_dest, &last_fail);
+                      client_proxy, client_dest,
+                      &tcp_client,
+                      &last_fail);
     }
 
-    int local_udp_sock_fd = bind_local_udp(udp_local_listen);
+    int local_udp_sock_fd = bind_local_udp(udp_local_listen, &udp_server_ai);
+
+    if (udp_local_dest != NULL) {
+        udp_client_len = sizeof(udp_client);
+        if (!resolve_dest_with_hints(udp_local_dest, &udp_server_ai,
+                                     (struct sockaddr *) &udp_client, &udp_client_len)) {
+            die("Unable to resolve local UDP dest host", errno);
+        }
+    }
 
     fd_set readfds, writefds, errorfds;
     int maxfd;
@@ -253,7 +263,9 @@ void run_forever(int udp_local_listen, char *udp_local_dest,
         if (is_client) {
             grow_subflows(active_subflows_state, &active_subflows_count,
                           client_conenctions,
-                          client_proxy, client_dest, &last_fail);
+                          client_proxy, client_dest,
+                          &tcp_client,
+                          &last_fail);
         }
     }
     free(active_subflows_state);
@@ -266,20 +278,18 @@ void print_help(char **argv) {
                    "through them.\n");
 
     fprintf(stderr, "Usage: %s [-ldcsknph]\n", argv[0]);
-    fprintf(stderr, "\t-l  <udp_listen_port> Local UDP port to listen.\n");
-    fprintf(stderr,
-            "\t-d  <addr>:<port> Where to send incoming UDP. If absent, will be determined from the first received packet.\n");
+    fprintf(stderr, "\t-l  <udp_listen_host>:<udp_listen_port> UDP address to listen.\n");
+    fprintf(stderr, "\t-d  <addr>:<port> Where to send incoming UDP. If absent, will be determined from the first received packet.\n");
     fprintf(stderr, "\t-c  <dest_host>:<dest_port> Client mode.\n");
-    fprintf(stderr, "\t-s  [<listen_addr>:]<listen_port> Server mode.\n");
+    fprintf(stderr, "\t-s  <listen_addr>:<listen_port> Server mode. TCP socket to listen on.\n");
     fprintf(stderr, "\t-k  <shared_secret> Common shared secret between client and server.\n");
-    fprintf(stderr, "\t-n  <client_connection_number> Number of TCP connections to maintain (not more than %d).\n",
-            MAX_TUNNEL_CONNECTIONS);
+    fprintf(stderr, "\t-n  <client_connection_number> Number of TCP connections to maintain (not more than %d).\n", MAX_TUNNEL_CONNECTIONS);
     fprintf(stderr, "\t-p  <client_proxy_host>:<client_proxy_port> HTTP proxy to connect via (if needed).\n");
     fprintf(stderr, "\t-h  Print this help.\n");
 }
 
 int main(int argc, char **argv) {
-    int udp_local_listen = -1;
+    char *udp_local_listen = NULL;
     char *udp_local_dest = NULL;
     int is_client = -1;
     char *shared_secret = NULL;
@@ -293,7 +303,7 @@ int main(int argc, char **argv) {
     while ((i = getopt(argc, argv, "l:c:s:k:n:p:d:h")) != -1) {
         switch (i) {
             case 'l':
-                udp_local_listen = atoi(optarg);
+                udp_local_listen = strdup(optarg);
                 break;
             case 'c':
                 is_client = 1;
@@ -321,7 +331,7 @@ int main(int argc, char **argv) {
         }
     }
 
-    if (udp_local_listen < 0) {
+    if (udp_local_listen == NULL) {
         fprintf(stderr, "-l is required\n");
         help = 1;
     }
@@ -354,7 +364,8 @@ int main(int argc, char **argv) {
     run_forever(udp_local_listen, udp_local_dest,
                 is_client, server_listen,
                 shared_secret,
-                client_conenctions, client_proxy, client_dest);
+                client_conenctions,
+                client_proxy, client_dest);
 
     free(shared_secret);
     free(client_proxy);

@@ -9,24 +9,44 @@
 #include <syslog.h>
 #include <arpa/inet.h>
 #include <errno.h>
+#include <netdb.h>
+#include <unistd.h>
 
 #include "utils.h"
 #include "conf.h"
 
 
-int bind_local_udp(int port) {
-    struct sockaddr_in si_bind;
+int bind_local_udp(const char *udp_listen_host, struct addrinfo * chosen_ai) {
+    struct addrinfo hints, *res, *p;
     int sock_fd;
 
-    if ((sock_fd = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
-        die("Unable to create listening UDP socket", errno);
+    char hostname [120];
+    char port [10];
 
-    memset(&si_bind, 0, sizeof(si_bind));
-    si_bind.sin_family = AF_INET;
-    si_bind.sin_port = htons(port);
-    si_bind.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_socktype = SOCK_DGRAM;
+    parse_host(udp_listen_host, (char *) &hostname, 120, (char *) &port, 10, &hints.ai_family);
 
-    if (bind(sock_fd, (struct sockaddr *) &si_bind, sizeof(si_bind)) == -1)
+    int rc = getaddrinfo((char *) &hostname, (char *) &port, &hints, &res);
+    if (rc != 0) {
+        fprintf(stderr, "Unable to resolve UDP bind address %s. (%d: %s)\n", hostname, rc, gai_strerror(rc));
+        exit(1);
+    }
+
+    int bound = 0;
+    for (p = res; p != NULL; p = p->ai_next) {
+        if ((sock_fd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1)
+            continue;
+        if (bind(sock_fd, p->ai_addr, p->ai_addrlen) == -1) {
+            close(sock_fd);
+            continue;
+        }
+        bound = 1;
+        memcpy(chosen_ai, p, sizeof(struct addrinfo));
+        break;
+    }
+    freeaddrinfo(res);
+    if (!bound)
         die("Unable to bind UDP socket", errno);
 
     set_noblock(sock_fd);
@@ -35,26 +55,42 @@ int bind_local_udp(int port) {
 
 
 int bind_server_tcp_socket(const char *server_listen) {
-    struct sockaddr_in si_bind;
+    struct addrinfo hints, *res, *p;
     int sock_fd;
     socklen_t clen;
 
-    if ((sock_fd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
-        die("Unable to create server listening TCP socket", errno);
+    char hostname [120];
+    char port [10];
+
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_socktype = SOCK_STREAM;
+    parse_host(server_listen, (char *) &hostname, 120, (char *) &port, 10, &hints.ai_family);
+
+    int rc = getaddrinfo((char *) &hostname, (char *) &port, &hints, &res);
+    if (rc != 0) {
+        fprintf(stderr, "Unable to resolve TCP bind address %s. (%d: %s)\n", hostname, rc, gai_strerror(rc));
+        exit(1);
     }
 
-    clen = 1;
-    setsockopt(sock_fd, SOL_SOCKET, SO_REUSEADDR, &clen, sizeof(clen));
+    int bound = 0;
+    for (p = res; p != NULL; p = p->ai_next) {
+        if ((sock_fd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1)
+            continue;
 
-    memset(&si_bind, 0, sizeof(si_bind));
-    si_bind.sin_family = AF_INET;
-    if (!resolve_host(server_listen, &si_bind.sin_addr, &si_bind.sin_port)) {
-        die("Unable to resolve server TCP listen address", errno);
-    }
+        clen = 1;
+        setsockopt(sock_fd, SOL_SOCKET, SO_REUSEADDR, &clen, sizeof(clen));
 
-    if (bind(sock_fd, (struct sockaddr *) &si_bind, sizeof(struct sockaddr)) == -1) {
-        die("Unable to bind server listening TCP socket", errno);
+        if (bind(sock_fd, p->ai_addr, p->ai_addrlen) == -1) {
+            close(sock_fd);
+            continue;
+        }
+
+        bound = 1;
+        break;
     }
+    freeaddrinfo(res);
+    if (!bound)
+        die("Unable to bind UDP socket", errno);
 
     if (listen(sock_fd, BACKLOG) == -1) {
         die("Unable to listen server listening TCP socket", errno);
@@ -65,8 +101,8 @@ int bind_server_tcp_socket(const char *server_listen) {
 }
 
 int server_accept_client(int server_tcp_sock_fd) {
-    struct sockaddr_in clientaddr;
-    socklen_t clientlen;
+    struct sockaddr_storage clientaddr;
+    socklen_t clientlen = sizeof(clientaddr);
 
     int childfd = accept(server_tcp_sock_fd,
                          (struct sockaddr *) &clientaddr, &clientlen);
@@ -75,4 +111,65 @@ int server_accept_client(int server_tcp_sock_fd) {
     }
 
     return childfd;
+}
+
+int resolve_dest_with_hints(const char *host, struct addrinfo *hints_,
+                            struct sockaddr *si_res, socklen_t *si_res_size) {
+    struct addrinfo hints, *res, *p;
+    char hostname [120];
+    char port [10];
+
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = hints_->ai_family;
+    hints.ai_socktype = hints_->ai_socktype;
+    hints.ai_protocol = hints_->ai_protocol;
+
+    parse_host(host, (char *) &hostname, 120, (char *) &port, 10, &hints.ai_family);
+
+    int rc = getaddrinfo((char *) &hostname, (char *) &port, &hints, &res);
+    if (rc != 0) {
+        fprintf(stderr, "Unable to resolve address %s. (%d: %s)\n", host, rc, gai_strerror(rc));
+        return 0;
+    }
+    for (p = res; p != NULL; p = p->ai_next) {
+        if (p->ai_addrlen > *si_res_size)
+            continue;
+        memcpy(si_res, p->ai_addr, p->ai_addrlen);
+        *si_res_size = p->ai_addrlen;
+        freeaddrinfo(res);
+        return 1;
+    }
+
+    freeaddrinfo(res);
+    return 0;
+}
+
+int resolve_dest_to_ai(const char *host, struct addrinfo *ai_res, int ai_socktype) {
+    struct addrinfo hints, *res, *p;
+    int sock_fd;
+
+    char hostname [120];
+    char port [10];
+
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_socktype = ai_socktype;
+    parse_host(host, (char *) &hostname, 120, (char *) &port, 10, &hints.ai_family);
+
+    int rc = getaddrinfo((char *) &hostname, (char *) &port, &hints, &res);
+    if (rc != 0) {
+        fprintf(stderr, "Unable to resolve address %s. (%d: %s)\n", host, rc, gai_strerror(rc));
+        return 0;
+    }
+
+    for (p = res; p != NULL; p = p->ai_next) {
+        if ((sock_fd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1)
+            continue;
+        close(sock_fd);
+
+        memcpy(ai_res, p, sizeof(struct addrinfo));
+        freeaddrinfo(res);
+        return 1;
+    }
+    freeaddrinfo(res);
+    return 0;
 }

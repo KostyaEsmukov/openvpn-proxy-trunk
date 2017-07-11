@@ -6,28 +6,23 @@
 #include <errno.h>
 #include <string.h>
 #include <stdio.h>
+#include <netdb.h>
 
 #include "utils.h"
 
 
-int connect_directly(struct sockaddr_in si_dest) {
-    struct sockaddr_in si_bind;
+int connect_directly(struct addrinfo * ai_dest) {
     int sock_fd;
     socklen_t clen;
 
-    if ((sock_fd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
+    if ((sock_fd = socket(ai_dest->ai_family, ai_dest->ai_socktype, ai_dest->ai_protocol)) == -1) {
         return -1;
     }
 
     clen = 1;
     setsockopt(sock_fd, SOL_SOCKET, SO_REUSEADDR, &clen, sizeof(clen));
 
-    memset(&si_bind, 0, sizeof(si_bind));
-    si_bind.sin_family = AF_INET;
-    si_bind.sin_addr = si_dest.sin_addr;
-    si_bind.sin_port = si_dest.sin_port;
-
-    if (connect(sock_fd, (struct sockaddr *) &si_bind, sizeof(struct sockaddr)) == -1) {
+    if (connect(sock_fd, ai_dest->ai_addr, ai_dest->ai_addrlen) == -1) {
         return -1;
     }
 
@@ -35,9 +30,9 @@ int connect_directly(struct sockaddr_in si_dest) {
     return sock_fd;
 }
 
-int connect_via_proxy(struct sockaddr_in si_proxy, char *dest) {
+int connect_via_proxy(struct addrinfo * ai_proxy, const char *dest) {
 
-    int proxyfd = connect_directly(si_proxy);
+    int proxyfd = connect_directly(ai_proxy);
     if (proxyfd < 0)
         return proxyfd;
 
@@ -49,5 +44,4 @@ int connect_via_proxy(struct sockaddr_in si_proxy, char *dest) {
 
     return proxyfd;
 }
-
 
