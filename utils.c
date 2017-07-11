@@ -137,6 +137,8 @@ ssize_t readexactly(int fd, void *buf, size_t nbyte) {
 
     do {
         if ((i = read(fd, buf + buf_pos, nbyte - buf_pos)) < 0) {
+            if (errno == EAGAIN)
+                continue;
             return i;
         }
         buf_pos += i;
@@ -150,6 +152,8 @@ ssize_t sendexactly(int fd, void *buf, size_t nbyte) {
 
     do {
         if ((i = send(fd, buf + buf_pos, nbyte - buf_pos, 0)) < 0) {
+            if (errno == EAGAIN)
+                continue;
             return i;
         }
         buf_pos += i;

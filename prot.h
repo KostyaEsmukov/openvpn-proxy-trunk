@@ -77,6 +77,7 @@ struct client_ack {
 struct udp_datagram_header {
     uint16_t datagram_len;
 };
+typedef struct udp_datagram_header udp_datagram_header;
 
 // local state
 
@@ -93,7 +94,6 @@ struct subflow_state {
     uint32_t server_nonce;
     ss_state state;
 };
-
 typedef struct subflow_state subflow_state;
 
 // hmac data

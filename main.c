@@ -16,6 +16,7 @@
 #define MAX_TUNNEL_CONNECTIONS 20
 #define SUBFLOW_INIT_DEADLINE_SECONDS 10  // drop subflows which haven't entered READY state in that time
 #define GROW_DELAY_AFTER_FAIL_SECONDS 5
+#define BUFSIZE_UDP (2 << 16)
 
 int quit = 0;
 void sighandler(int p) {
@@ -167,6 +168,31 @@ void grow_subflows(subflow_state *active_subflows_state, int *active_subflows_co
     }
 }
 
+int write_outgoing_datagram(char * buf, ssize_t len,
+                            subflow_state *active_subflows_state, int active_subflows_count,
+                            int *last_write_subflow,
+                            fd_set *writefds) {
+    for (int i = 0; i < active_subflows_count; i++) {
+        int cur = (*last_write_subflow + i) % active_subflows_count;
+
+        if (active_subflows_state[i].state != SS_READY)
+            continue; // not suitable yet
+
+        if (!FD_ISSET(active_subflows_state[i].sock_fd, writefds))
+            continue; // not available for writing atm
+
+        if (sendexactly(active_subflows_state[i].sock_fd, &buf, len) < 0) {
+            // write has failed, but we don't know for sure, so let's just drop that datagram
+            *last_write_subflow = cur;
+            return 0;
+        }
+        *last_write_subflow = cur;
+        return 1;
+    }
+    // drop the datagram - no suitable subflow for writing
+    return 0;
+}
+
 void run_forever(int udp_local_listen, int is_client, const char * server_listen,
                  const char * shared_secret,
                  int client_conenctions, char * client_proxy, char * client_dest) {
@@ -174,6 +200,10 @@ void run_forever(int udp_local_listen, int is_client, const char * server_listen
     subflow_state *active_subflows_state = (subflow_state *) malloc(sizeof(subflow_state) * MAX_TUNNEL_CONNECTIONS);
     int active_subflows_count = 0;
     clock_t last_fail = clock() - GROW_DELAY_AFTER_FAIL_SECONDS - 1;
+    int last_write_subflow = 0;
+    char * udp_buf = (char *)malloc(BUFSIZE_UDP);
+    struct sockaddr udp_client;
+    socklen_t udp_client_len;
 
     int server_tcp_sock_fd;
 
@@ -181,23 +211,29 @@ void run_forever(int udp_local_listen, int is_client, const char * server_listen
         server_tcp_sock_fd = bind_server_tcp_socket(server_listen);
 
     if (is_client) {
-        grow_subflows(active_subflows_state, &active_subflows_count, client_conenctions, client_proxy, client_dest, &last_fail);
+        grow_subflows(active_subflows_state, &active_subflows_count,
+                      client_conenctions,
+                      client_proxy, client_dest, &last_fail);
     }
 
     int local_udp_sock_fd = bind_local_udp(udp_local_listen);
 
-    fd_set readfds, errorfds;
+    fd_set readfds, writefds, errorfds;
     int maxfd;
 
     while (quit == 0) {
         FD_ZERO(&readfds);
+        FD_ZERO(&writefds);
         FD_ZERO(&errorfds);
 
+        // watch local UDP listening socket for input datagrams and errors.
+        // no need to watch for write availability - just throw datagrams out as they come.
         FD_SET(local_udp_sock_fd, &readfds);
         FD_SET(local_udp_sock_fd, &errorfds);
         maxfd = local_udp_sock_fd;
 
         if (!is_client) {
+            // watch for new connections on server TCP socket
             FD_SET(server_tcp_sock_fd, &readfds);
             FD_SET(server_tcp_sock_fd, &errorfds);
             maxfd = MAX(maxfd, server_tcp_sock_fd);
@@ -205,25 +241,54 @@ void run_forever(int udp_local_listen, int is_client, const char * server_listen
 
         for (int i = 0; i < active_subflows_count; i++) {
             FD_SET(active_subflows_state[i].sock_fd, &readfds);
+            FD_SET(active_subflows_state[i].sock_fd, &writefds);
             FD_SET(active_subflows_state[i].sock_fd, &errorfds);
             maxfd = MAX(maxfd, active_subflows_state[i].sock_fd);
         }
 
-        if (select(maxfd + 1, &readfds, 0, &errorfds, 0) < 0) {
+        if (select(maxfd + 1, &readfds, &writefds, &errorfds, 0) < 0) {
+            if (errno == EAGAIN) continue;
             die("ERROR in select", errno);
         }
 
-        if (FD_ISSET(local_udp_sock_fd, &readfds)) {
-            // todo choose free alive subflow + send UDP
-        }
+        /**
+         * Read from local UDP socket
+         */
         if (FD_ISSET(local_udp_sock_fd, &errorfds)) {
             die("Local UDP listening socket has failed", errno);
+        }
+        if (FD_ISSET(local_udp_sock_fd, &readfds)) {
+            // recv always returns a single full datagram. see man 2 recv.
+            ssize_t len = recvfrom(
+                    local_udp_sock_fd,
+                    udp_buf + sizeof(udp_datagram_header),  // reserve space for header
+                    BUFSIZE_UDP - sizeof(udp_datagram_header),
+                    0, &udp_client, &udp_client_len);
+            if (len <= 0) {
+                if (errno != EAGAIN)
+                    die("Local UDP recv failed", errno);
+            }
+            if (len > 0) {
+                udp_datagram_header header;
+                header.datagram_len = len;
+                memcpy(udp_buf, &header, sizeof(udp_datagram_header));
+                if (!write_outgoing_datagram(
+                        udp_buf, len + sizeof(udp_datagram_header),
+                        active_subflows_state, active_subflows_count,
+                        &last_write_subflow, &writefds)) {
+                    // this datagram has been dropped
+                    // todo ?? maybe log?
+                }
+            }
         }
 
         /**
          * Accept new TCP subflows on the server TCP listening socket
          */
         if (!is_client) {
+            if (FD_ISSET(server_tcp_sock_fd, &errorfds)) {
+                die("Server TCP listening socket has failed", errno);
+            }
             if (FD_ISSET(server_tcp_sock_fd, &readfds)) {
                 int childfd = server_accept_client(server_tcp_sock_fd);
                 if (active_subflows_count >= MAX_TUNNEL_CONNECTIONS) {  // drop extra connections
@@ -234,13 +299,9 @@ void run_forever(int udp_local_listen, int is_client, const char * server_listen
                     free(new_subflow);
                 }
             }
-            if (FD_ISSET(server_tcp_sock_fd, &errorfds)) {
-                die("Server TCP listening socket has failed", errno);
-            }
         }
 
         for (int i = active_subflows_count - 1; i >= 0; i--) {  // reversed to be able to delete subflows
-
             if (FD_ISSET(active_subflows_state[i].sock_fd, &errorfds)) {
                 syslog(LOG_INFO, "Subflow died");
                 close(active_subflows_state[i].sock_fd);
@@ -262,10 +323,13 @@ void run_forever(int udp_local_listen, int is_client, const char * server_listen
         }
 
         if (is_client) {
-            grow_subflows(active_subflows_state, &active_subflows_count, client_conenctions, client_proxy, client_dest, &last_fail);
+            grow_subflows(active_subflows_state, &active_subflows_count,
+                          client_conenctions,
+                          client_proxy, client_dest, &last_fail);
         }
     }
     free(active_subflows_state);
+    free(udp_buf);
 }
 
 void print_help(char **argv) {
