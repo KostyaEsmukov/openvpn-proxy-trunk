@@ -13,6 +13,7 @@
 #include "connect.h"
 #include "conf.h"
 #include "bind.h"
+#include "subflow.h"
 
 
 int quit = 0;
@@ -23,31 +24,6 @@ void sighandler(int p) {
         syslog(LOG_INFO, "Signal %d received, forcing shutdown\n", p);
 
     quit++;
-}
-
-void add_subflow(subflow_state *active_subflows_state, int *active_subflows_count, subflow_state *new_subflow) {
-    if (*active_subflows_count >= MAX_TUNNEL_CONNECTIONS) {
-        fprintf(stderr, "Assertion error. Tried to add more connections than expected\n");
-        exit(1);
-    }
-
-    memcpy(new_subflow, &active_subflows_state[(*active_subflows_count)++], sizeof(subflow_state));
-}
-
-void remove_subflow(subflow_state *active_subflows_state, int *active_subflows_count, int delete_fd) {
-    int pos;
-    for (pos = 0; pos < *active_subflows_count; pos++) {
-        if (active_subflows_state[pos].sock_fd == delete_fd)
-            break;
-    }
-    if (pos >= *active_subflows_count)
-        return; // not found
-
-    for (; pos + 1 < *active_subflows_count; pos++) {
-        active_subflows_state[pos] = active_subflows_state[pos + 1];
-    }
-
-    --(*active_subflows_count);
 }
 
 void grow_subflows(subflow_state *active_subflows_state, int *active_subflows_count,
@@ -91,12 +67,11 @@ void grow_subflows(subflow_state *active_subflows_state, int *active_subflows_co
             *last_fail = clock();
             return;
         }
-        subflow_state * new_subflow = accept_subflow(childfd);
         if (client_proxy != NULL) {
-            new_subflow->state = SS_PROXY_RESPONSE_WAITING;
+            add_subflow_proxy_waiting(active_subflows_state, active_subflows_count, childfd);
+        } else {
+            add_subflow_unk(active_subflows_state, active_subflows_count, childfd);
         }
-        add_subflow(active_subflows_state, active_subflows_count, new_subflow);
-        free(new_subflow);
     }
 }
 
@@ -226,9 +201,7 @@ void run_forever(int udp_local_listen, int is_client, const char * server_listen
                 if (active_subflows_count >= MAX_TUNNEL_CONNECTIONS) {  // drop extra connections
                     close(childfd);
                 } else {
-                    subflow_state * new_subflow = accept_subflow(childfd);
-                    add_subflow(active_subflows_state, &active_subflows_count, new_subflow);
-                    free(new_subflow);
+                    add_subflow_unk(active_subflows_state, &active_subflows_count, childfd);
                 }
             }
         }

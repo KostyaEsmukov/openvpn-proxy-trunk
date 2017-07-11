@@ -18,13 +18,7 @@ unsigned char *hmac_sha256(const void *key, int keylen,
     return HMAC(EVP_sha256(), key, keylen, data, datalen, NULL, NULL);
 }
 
-subflow_state * accept_subflow(int fd) {
-    subflow_state * new_subflow = (subflow_state *)malloc(sizeof(subflow_state));
-    new_subflow->sock_fd = fd;
-    new_subflow->state = SS_UNK;
-    new_subflow->connect_clock = clock();
-    return new_subflow;
-}
+
 
 
 //

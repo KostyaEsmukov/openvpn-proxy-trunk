@@ -10,7 +10,6 @@
 #define MAGIC_HEADER "MG\x00\x42"
 #define MAGIC_HEADER_LEN 4
 
-#define ALLOWED_TIME_DRIFT_SECONDS (60 * 5)
 
 /**
                            +---------+         +---------+
@@ -79,23 +78,6 @@ struct udp_datagram_header {
 };
 typedef struct udp_datagram_header udp_datagram_header;
 
-// local state
-
-enum ss_state {
-    SS_PROXY_RESPONSE_WAITING, SS_UNK, SS_GREETED, SS_READY
-};
-typedef enum ss_state ss_state;
-
-struct subflow_state {
-    int sock_fd;
-    clock_t connect_clock;
-    uint32_t tunnel_id;
-    uint32_t client_nonce;
-    uint32_t server_nonce;
-    ss_state state;
-};
-typedef struct subflow_state subflow_state;
-
 // hmac data
 
 struct hmac_data {
@@ -116,7 +98,7 @@ struct hmac_data {
 //    return res;
 //}
 
-subflow_state * accept_subflow(int fd);
+
 
 
 #endif //OPENVPN_PROXY_TRUNK_PROT_H
