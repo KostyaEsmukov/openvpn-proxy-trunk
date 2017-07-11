@@ -7,24 +7,30 @@
 
 #include <inttypes.h>
 
+#include "subflow.h"
+
 #define MAGIC_HEADER "MG\x00\x42"
 #define MAGIC_HEADER_LEN 4
 
+#define HMAC_LEN 32  // sha256
 
 /**
                            +---------+         +---------+
                            | Client  |         | Server  |
                            +---------+         +---------+
-          --------------------\ |                   |
-          | UNK + tunnel_id + |-|                   |
-          | client_nonce      | |                   |
-          |-------------------| |                   | ------\
-                                |                   |-| UNK |
-                                |                   | |-----|
+   ---------------------------\ |                   |
+   | [PROXY_RESPONSE_WAITING] |-|                   |
+   |--------------------------| |                   |
+                                |                   | ---------------------\
+                                |                   |-| UNK + server_nonce |
+                                |                   | |--------------------|
                                 |                   |
                                 | client_greet      |
                                 |------------------>|
-                                |                   | ------------------------------\
+          --------------------\ |                   |
+          | UNK + tunnel_id + |-|                   |
+          | client_nonce      | |                   |
+          |-------------------| |                   | ------------------------------\
                                 |                   |-| GREETED + tunnel_id +       |
                                 |                   | | client_nonce + server_nonce |
                                 |                   | |-----------------------------|
@@ -41,14 +47,14 @@
                                 |                   | | client_nonce + server_nonce |
                                 |                   | |-----------------------------|
 
-
 http://textart.io/sequence
 Source:
 
 object Client Server
-note left of Client: UNK + tunnel_id +\n client_nonce
-note right of Server: UNK
+note left of Client: [PROXY_RESPONSE_WAITING]
+note right of Server: UNK + server_nonce
 Client->Server: client_greet
+note left of Client: UNK + tunnel_id +\n client_nonce
 note right of Server: GREETED + tunnel_id +\n client_nonce + server_nonce
 Server->Client: server_greet
 note left of Client: READY + tunnel_id +\n client_nonce + server_nonce
@@ -61,16 +67,16 @@ note right of Server: READY + tunnel_id +\n client_nonce + server_nonce
 
 struct client_greet {
     uint32_t tunnel_id;
-    uint32_t nonce;
+    uint32_t client_nonce;
 };
 
 struct server_greet {
-    uint32_t nonce;
-    char hmac[32];
+    uint32_t server_nonce;
+    char hmac[HMAC_LEN]; // "s1" tunnel_id client_nonce server_nonce
 };
 
 struct client_ack {
-    char hmac[32];
+    char hmac[HMAC_LEN]; // "c1" tunnel_id client_nonce server_nonce
 };
 
 struct udp_datagram_header {
@@ -98,6 +104,10 @@ struct hmac_data {
 //    return res;
 //}
 
+
+int send_client_greet(subflow_state * subflow);
+
+int process_negotiation_buffer(subflow_state *subflow, int is_client, const char *shared_secret);
 
 
 

@@ -8,31 +8,52 @@
 #include <string.h>
 #include <arpa/inet.h>
 #include <time.h>
+#include <assert.h>
 
 #include "conf.h"
 #include "subflow.h"
+#include "utils.h"
 
 
-void _add_subflow(subflow_state *active_subflows_state, int *active_subflows_count, int sock_fd, ss_state state) {
-    if (*active_subflows_count >= MAX_TUNNEL_CONNECTIONS) {
-        fprintf(stderr, "Assertion error. Tried to add more connections than expected\n");
-        exit(1);
-    }
+subflow_state *_add_subflow(subflow_state *active_subflows_state,
+                            int *active_subflows_count,
+                            int sock_fd,
+                            ss_state state,
+                            uint32_t active_tunnel_id, int is_client) {
+    assert(*active_subflows_count < MAX_TUNNEL_CONNECTIONS);
 
     subflow_state * new_subflow = &active_subflows_state[(*active_subflows_count)++];
     memset(new_subflow, 0, sizeof(subflow_state));
+
+    assert(!is_client || active_tunnel_id != 0);
+    new_subflow->tunnel_id = active_tunnel_id;
     new_subflow->sock_fd = sock_fd;
     new_subflow->state = state;
     new_subflow->connect_clock = clock();
+
+    uint32_t * nonce;
+    if (is_client) {
+        nonce = &new_subflow->client_nonce;
+    } else {
+        nonce = &new_subflow->server_nonce;
+    }
+    *nonce = 0;
+    while (*nonce == 0) *nonce = secure_random();
+
     new_subflow->buf_struct.buf = (char *) malloc(BUFSIZE_TCP_RECV);
+    return new_subflow;
 }
 
-void add_subflow_unk(subflow_state *active_subflows_state, int *active_subflows_count, int sock_fd) {
-    _add_subflow(active_subflows_state, active_subflows_count, sock_fd, SS_UNK);
+subflow_state *add_subflow_unk(subflow_state *active_subflows_state, int *active_subflows_count, int sock_fd,
+                               uint32_t active_tunnel_id, int is_client) {
+    return _add_subflow(active_subflows_state, active_subflows_count, sock_fd, SS_UNK, active_tunnel_id, is_client);
 }
 
-void add_subflow_proxy_waiting(subflow_state *active_subflows_state, int *active_subflows_count, int sock_fd) {
-    _add_subflow(active_subflows_state, active_subflows_count, sock_fd, SS_PROXY_RESPONSE_WAITING);
+subflow_state *add_subflow_proxy_waiting(subflow_state *active_subflows_state, int *active_subflows_count, int sock_fd,
+                                         uint32_t active_tunnel_id) {
+    // definitely a client
+    return _add_subflow(active_subflows_state, active_subflows_count, sock_fd, SS_PROXY_RESPONSE_WAITING,
+                        active_tunnel_id, 1);
 }
 
 void remove_subflow(subflow_state *active_subflows_state, int *active_subflows_count, int sock_fd) {

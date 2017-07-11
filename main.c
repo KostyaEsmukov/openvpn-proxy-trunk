@@ -26,13 +26,16 @@ void sighandler(int p) {
         syslog(LOG_INFO, "Signal %d received, forcing shutdown\n", p);
 
     quit++;
+
+    if (quit > 1)
+        exit(1);
 }
 
 void grow_subflows(subflow_state *active_subflows_state, int *active_subflows_count,
                    int desired_subflows_count,
                    const char *client_proxy, const char *client_dest,
                    struct addrinfo * ai,
-                   clock_t *last_fail) {
+                   clock_t *last_fail, uint32_t active_tunnel_id) {
 
     if (*active_subflows_count >= desired_subflows_count)
         return;
@@ -70,14 +73,23 @@ void grow_subflows(subflow_state *active_subflows_state, int *active_subflows_co
             return;
         }
         if (client_proxy != NULL) {
-            add_subflow_proxy_waiting(active_subflows_state, active_subflows_count, childfd);
+            add_subflow_proxy_waiting(active_subflows_state, active_subflows_count, childfd, active_tunnel_id);
         } else {
-            add_subflow_unk(active_subflows_state, active_subflows_count, childfd);
+            subflow_state * sf = add_subflow_unk(active_subflows_state, active_subflows_count, childfd, active_tunnel_id, 1);
+
+            // I know, this doesn't feels right to do it here
+            if (!send_client_greet(sf)) {
+                syslog(LOG_INFO, "Subflow client greet failed: (%d: %s)", errno, strerror(errno));
+                close(sf->sock_fd);
+                remove_subflow(active_subflows_state, active_subflows_count, sf->sock_fd);
+                *last_fail = clock();
+                return;
+            }
         }
     }
 }
 
-int write_outgoing_datagram(char *buf, ssize_t len,
+int write_outgoing_datagram(char *buf, size_t len,
                             subflow_state *active_subflows_state, int active_subflows_count,
                             int *last_write_subflow,
                             fd_set *writefds) {
@@ -102,12 +114,61 @@ int write_outgoing_datagram(char *buf, ssize_t len,
     return 0;
 }
 
+int fill_tcp_buf(subflow_state * subflow) {
+    ssize_t bufsize = BUFSIZE_TCP_RECV - subflow->buf_struct.pos;
+    if (bufsize > 0) {
+        int read = recv(
+                subflow->sock_fd,
+                subflow->buf_struct.buf + subflow->buf_struct.pos,
+                bufsize,
+                0); // flags
+        if (read <= 0) {
+            if (errno == EAGAIN)
+                return 1;
+            return 2;
+        }
+        subflow->buf_struct.pos += read;
+    }
+    return 0;
+}
+
+void send_udp(subflow_state * subflow,
+              int local_udp_sock_fd,
+              struct sockaddr_storage * udp_client, socklen_t udp_client_len) {
+    struct udp_datagram_header * dh;
+    ssize_t tail_size;
+    size_t pos = 0;  // to iterate through datagrams in the buf
+    while (1) {
+        dh = (struct udp_datagram_header *) (subflow->buf_struct.buf + pos);
+        tail_size = subflow->buf_struct.pos - sizeof(struct udp_datagram_header) - pos;
+        if (dh->datagram_len > tail_size)
+            break;  // not full datagram yet - need to receive more
+
+        ssize_t res = sendto(local_udp_sock_fd,
+                             subflow->buf_struct.buf + sizeof(struct udp_datagram_header) + pos,
+                             dh->datagram_len, 0,
+                             (struct sockaddr *) udp_client, udp_client_len);
+
+        if (res <= 0) {
+            if (errno == EAGAIN)
+                break; // will be retried later
+            syslog(LOG_WARNING, "Unable to send local UDP: (%d: %s)", errno, strerror(errno));
+            break;
+        } else {
+            pos += dh->datagram_len + sizeof(struct udp_datagram_header);
+        }
+    }
+    memmove(subflow->buf_struct.buf, subflow->buf_struct.buf + pos, subflow->buf_struct.pos - pos);
+    subflow->buf_struct.pos -= pos;
+}
+
 void run_forever(const char * udp_local_listen, const char *udp_local_dest,
                  int is_client, const char *server_listen,
                  const char *shared_secret,
                  int client_conenctions,
                  const char *client_proxy, const char *client_dest) {
-    uint32_t active_tunnel_id = secure_random();
+    uint32_t active_tunnel_id = 0;  // 0 on server means it is unknown yet
+    while (is_client && active_tunnel_id == 0) active_tunnel_id = secure_random();
 
     subflow_state *active_subflows_state = (subflow_state *) malloc(sizeof(subflow_state) * MAX_TUNNEL_CONNECTIONS);
     int active_subflows_count = 0;
@@ -131,7 +192,7 @@ void run_forever(const char * udp_local_listen, const char *udp_local_dest,
                       client_conenctions,
                       client_proxy, client_dest,
                       &tcp_client,
-                      &last_fail);
+                      &last_fail, active_tunnel_id);
     }
 
     int local_udp_sock_fd = bind_local_udp(udp_local_listen, &udp_server_ai);
@@ -148,6 +209,10 @@ void run_forever(const char * udp_local_listen, const char *udp_local_dest,
     int maxfd;
 
     while (quit == 0) {
+        if (!is_client && active_subflows_count == 0) {
+            active_tunnel_id = 0;  // accept new tunnels
+        }
+
         FD_ZERO(&readfds);
         FD_ZERO(&writefds);
         FD_ZERO(&errorfds);
@@ -234,7 +299,7 @@ void run_forever(const char * udp_local_listen, const char *udp_local_dest,
                 if (active_subflows_count >= MAX_TUNNEL_CONNECTIONS) {  // drop extra connections
                     close(childfd);
                 } else {
-                    add_subflow_unk(active_subflows_state, &active_subflows_count, childfd);
+                    add_subflow_unk(active_subflows_state, &active_subflows_count, childfd, active_tunnel_id, is_client);
                 }
             }
         }
@@ -248,7 +313,29 @@ void run_forever(const char * udp_local_listen, const char *udp_local_dest,
             }
 
             if (FD_ISSET(active_subflows_state[i].sock_fd, &readfds)) {
-                // todo read from subflow - either state update or new datagram
+                int res = fill_tcp_buf(&active_subflows_state[i]);
+                if (res == 1) continue; // eagain
+                if (res == 2) {
+                    syslog(LOG_INFO, "Subflow recv failed: (%d: %s)", errno, strerror(errno));
+                    close(active_subflows_state[i].sock_fd);
+                    remove_subflow(active_subflows_state, &active_subflows_count, active_subflows_state[i].sock_fd);
+                    continue;
+                }
+
+                if (active_subflows_state[i].buf_struct.pos != 0) {
+                    if (active_subflows_state[i].state == SS_READY) {
+                        send_udp(&active_subflows_state[i],
+                                 local_udp_sock_fd,
+                                 &udp_client, udp_client_len);
+                    } else {
+                        if (!process_negotiation_buffer(&active_subflows_state[i], is_client, shared_secret)) {
+                            syslog(LOG_INFO, "Subflow protocol negotiation failed: (%d: %s)", errno, strerror(errno));
+                            close(active_subflows_state[i].sock_fd);
+                            remove_subflow(active_subflows_state, &active_subflows_count, active_subflows_state[i].sock_fd);
+                            continue;
+                        }
+                    }
+                }
             }
 
             if (active_subflows_state[i].state != SS_READY) {
@@ -265,7 +352,7 @@ void run_forever(const char * udp_local_listen, const char *udp_local_dest,
                           client_conenctions,
                           client_proxy, client_dest,
                           &tcp_client,
-                          &last_fail);
+                          &last_fail, active_tunnel_id);
         }
     }
     free(active_subflows_state);
@@ -277,6 +364,7 @@ void print_help(char **argv) {
                    "via HTTP Proxy using CONNECT and tunnels UDP packets "
                    "through them.\n");
 
+    fprintf(stderr, "\n");
     fprintf(stderr, "Usage: %s [-ldcsknph]\n", argv[0]);
     fprintf(stderr, "\t-l  <udp_listen_host>:<udp_listen_port> UDP address to listen.\n");
     fprintf(stderr, "\t-d  <addr>:<port> Where to send incoming UDP. If absent, will be determined from the first received packet.\n");

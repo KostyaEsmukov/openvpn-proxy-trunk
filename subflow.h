@@ -26,8 +26,12 @@ struct subflow_state {
 };
 typedef struct subflow_state subflow_state;
 
-void add_subflow_unk(subflow_state *active_subflows_state, int *active_subflows_count, int sock_fd);
-void add_subflow_proxy_waiting(subflow_state *active_subflows_state, int *active_subflows_count, int sock_fd);
+subflow_state *add_subflow_unk(subflow_state *active_subflows_state, int *active_subflows_count, int sock_fd,
+                               uint32_t active_tunnel_id, int is_client);
+
+subflow_state *add_subflow_proxy_waiting(subflow_state *active_subflows_state, int *active_subflows_count, int sock_fd,
+                                         uint32_t active_tunnel_id);
+
 void remove_subflow(subflow_state *active_subflows_state, int *active_subflows_count, int sock_fd);
 
 #endif //OPENVPN_PROXY_TRUNK_SUBFLOW_H

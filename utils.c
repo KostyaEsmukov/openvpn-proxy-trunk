@@ -75,86 +75,24 @@ void parse_host(const char *host,
                 int *parsed_family) {
     size_t len = strlen(host);
 
-    size_t p = strrchr(host, ':') - host + 1;
-    if (p < len - 1 && host[len - 1] != ']') {
+    char * p = strrchr(host, ':');
+    ssize_t offset = -1;
+    if (p != NULL)
+        offset = p - host + 1;
+    if (offset >= 0 && offset < len - 1 && host[len - 1] != ']') {
         // this is port
-        strncpy(parsed_port, host + p + 1, MIN(len - p - 1, parsed_port_size));
-        len = p;
+        strncpy(parsed_port, host + offset + 1, MIN(len - offset - 1, parsed_port_size));
+        len = offset; // limit to addr part
     }
-    if (host[0] == '[' && host[len - 1] == ']') {  // ipv6
+    if (len >= 2 && host[0] == '[' && host[len - 1] == ']') {  // ipv6
         // strip braces
         strncpy(parsed_hostname, host + 1, MIN(len - 2, parsed_hostname_size));
         *parsed_family = AF_INET6;
     } else {
         strncpy(parsed_hostname, host, MIN(len, parsed_hostname_size));
-        *parsed_family = 0;
+        *parsed_family = 0;  // any
     }
 }
-
-///*
-// * gethostbyname() wrapper. Return 1 if OK, otherwise 0.
-// *
-// * from cntlm
-// */
-//int so_resolv(struct sockaddr_in * si, const char *name, int sock_type) {
-//
-//    struct addrinfo hints, *res, *p;
-//
-//    memset(&hints, 0, sizeof(hints));
-//    char * hostname;
-//    size_t namelen = strlen(name);
-//    if (name[0] == '[' && name[namelen - 1] == ']') {  // ipv6
-//        // strip braces
-//        hostname = substr(name, 1, namelen - 1);
-//        hints.ai_family = AF_INET6;
-//    } else {
-//        hostname = strdup(name);
-//        hints.ai_family = AF_INET;
-//    }
-//    hints.ai_socktype = sock_type; // SOCK_STREAM;
-//    int rc = getaddrinfo(hostname, NULL, &hints, &res);
-//    free(hostname);
-//    if (rc != 0) {
-//        syslog(LOG_INFO, "so_resolv: %s failed (%d: %s)\n", name, rc, gai_strerror(rc));
-//        return 0;
-//    }
-//
-//    for (p = res; p != NULL; p = p->ai_next) {
-//        struct sockaddr_in *ad = (struct sockaddr_in*)(p->ai_addr);
-//        if (ad == NULL) {
-//            continue;
-//        }
-//        memcpy(si, ad, sizeof(struct sockaddr_in));
-//        freeaddrinfo(res);
-//        return 1; // resolved
-//    }
-//
-//    freeaddrinfo(res);
-//    return 0;
-//}
-//
-//
-
-//
-//int resolve_host_connect(const char * host, struct sockaddr_in * si, int sock_type) {
-//    int len, p;
-//    char * addr_str;
-//
-//    len = strlen(host);
-//    p = strrchr(host, ':') - host + 1;
-//    if (p < len-1) {
-//        addr_str = substr(host, 0, p);
-//        if (!so_resolv(si, addr_str, sock_type)) {
-//            syslog(LOG_ERR, "Cannot resolve address %s\n", addr_str);
-//            return 0;
-//        }
-//        free(addr_str);
-//        si->sin_port = htons(atoi(host+p+1));
-//        return 1; // resolved
-//    }
-//    fprintf(stderr, "Invalid host %s.", host);
-//    return 0;
-//}
 
 //ssize_t readexactly(int fd, void *buf, size_t nbyte) {
 //    ssize_t i;
