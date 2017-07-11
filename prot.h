@@ -7,10 +7,12 @@
 
 #include <inttypes.h>
 
+#include "conf.h"
 #include "subflow.h"
 
-#define MAGIC_HEADER "MG\x00\x42"
-#define MAGIC_HEADER_LEN 4
+#define CLIENT_GREET_LEN (MAGIC_HEADER_LEN + sizeof(struct client_greet))
+#define SERVER_GREET_LEN (MAGIC_HEADER_LEN + sizeof(struct server_greet))
+#define CLIENT_ACK_LEN (MAGIC_HEADER_LEN + sizeof(struct client_ack))
 
 #define HMAC_LEN 32  // sha256
 
@@ -65,44 +67,33 @@ note right of Server: READY + tunnel_id +\n client_nonce + server_nonce
 
 // packets
 
-struct client_greet {
+struct __attribute__((__packed__)) client_greet {
     uint32_t tunnel_id;
     uint32_t client_nonce;
 };
 
-struct server_greet {
+struct __attribute__((__packed__)) server_greet {
     uint32_t server_nonce;
     char hmac[HMAC_LEN]; // "s1" tunnel_id client_nonce server_nonce
 };
 
-struct client_ack {
+struct __attribute__((__packed__)) client_ack {
     char hmac[HMAC_LEN]; // "c1" tunnel_id client_nonce server_nonce
 };
 
-struct udp_datagram_header {
+struct __attribute__((__packed__)) udp_datagram_header {
     uint16_t datagram_len;
 };
 typedef struct udp_datagram_header udp_datagram_header;
 
 // hmac data
 
-struct hmac_data {
+struct __attribute__((__packed__)) hmac_data {
     char prefix [2];  // cl - client, se - server
     uint32_t tunnel_id;
     uint32_t client_nonce;
     uint32_t server_nonce;
 };
-
-//
-//static struct sign_message *sign_message_new(struct client_helo *header) {
-//    struct sign_message *res;
-//    res = (struct sign_message *) malloc(sizeof(struct sign_message));
-//    strcpy(res->prefix, "cl");
-//    res->time = header->time;
-//    res->tunnel_id = header->tunnel_id;
-//    res->subflow_id = header->subflow_id;
-//    return res;
-//}
 
 
 int send_client_greet(subflow_state * subflow);

@@ -5,6 +5,9 @@
 #ifndef OPENVPN_PROXY_TRUNK_CONF_H
 #define OPENVPN_PROXY_TRUNK_CONF_H
 
+#define MAGIC_HEADER "MG\x00\x42"
+#define MAGIC_HEADER_LEN 4
+
 #define BACKLOG 10  // server tcp listen backlog
 #define MAX_TUNNEL_CONNECTIONS 20
 #define SUBFLOW_INIT_DEADLINE_SECONDS 10  // drop subflows which haven't entered READY state in that time

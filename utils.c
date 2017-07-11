@@ -34,41 +34,6 @@ void set_noblock(int sock_fd) {
     }
 }
 
-
-/*
- * Shortcut for malloc/memset zero.
- */
-char *new(size_t size) {
-    char *tmp;
-
-    tmp = malloc(size);
-    memset(tmp, 0, size);
-
-    return tmp;
-}
-
-/*
- * Standard substr. To prevent modification of the source
- * (terminating \x0), return the result in a new memory.
- */
-char *substr(const char *src, size_t pos, size_t len) {
-    size_t l;
-    char *tmp;
-
-    if (len == 0)
-        len = strlen(src);
-
-    l = MIN(len, strlen(src) - pos);
-    if (l <= 0) {
-        return new(1);
-    }
-
-    tmp = new(l + 1);
-    strlcpy(tmp, src + pos, l + 1);
-
-    return tmp;
-}
-
 void parse_host(const char *host,
                 char *parsed_hostname, size_t parsed_hostname_size,
                 char *parsed_port, size_t parsed_port_size,

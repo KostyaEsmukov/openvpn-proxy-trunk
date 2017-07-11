@@ -73,3 +73,8 @@ void remove_subflow(subflow_state *active_subflows_state, int *active_subflows_c
 
     --(*active_subflows_count);
 }
+
+void remove_from_buf(subflow_state *subflow, size_t offset) {
+    memmove(subflow->buf_struct.buf, subflow->buf_struct.buf + offset, subflow->buf_struct.pos - offset);
+    subflow->buf_struct.pos -= offset;
+}

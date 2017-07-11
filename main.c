@@ -158,8 +158,7 @@ void send_udp(subflow_state * subflow,
             pos += dh->datagram_len + sizeof(struct udp_datagram_header);
         }
     }
-    memmove(subflow->buf_struct.buf, subflow->buf_struct.buf + pos, subflow->buf_struct.pos - pos);
-    subflow->buf_struct.pos -= pos;
+    remove_from_buf(subflow, pos);
 }
 
 void run_forever(const char * udp_local_listen, const char *udp_local_dest,

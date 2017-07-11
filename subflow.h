@@ -34,4 +34,6 @@ subflow_state *add_subflow_proxy_waiting(subflow_state *active_subflows_state, i
 
 void remove_subflow(subflow_state *active_subflows_state, int *active_subflows_count, int sock_fd);
 
+void remove_from_buf(subflow_state *subflow, size_t offset);
+
 #endif //OPENVPN_PROXY_TRUNK_SUBFLOW_H
