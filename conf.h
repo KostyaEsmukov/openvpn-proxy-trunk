@@ -15,4 +15,10 @@
 #define BUFSIZE_UDP (2 << 16)  // from local udp
 #define BUFSIZE_TCP_RECV (2 << 16)  // from tcp to local udp, CONNECT proxy response, initial neg
 
+#define DEBUG 1
+
+#ifdef DEBUG
+#define syslog(priority, ...) printf(__VA_ARGS__)
+#endif
+
 #endif //OPENVPN_PROXY_TRUNK_CONF_H

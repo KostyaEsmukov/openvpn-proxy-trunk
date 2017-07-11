@@ -46,17 +46,23 @@ void parse_host(const char *host,
         offset = p - host + 1;
     if (offset >= 0 && offset < len - 1 && host[len - 1] != ']') {
         // this is port
-        strncpy(parsed_port, host + offset + 1, MIN(len - offset - 1, parsed_port_size));
-        len = offset; // limit to addr part
+        size_t parsed_pos_len = MIN(len - offset, parsed_port_size);
+        strncpy(parsed_port, host + offset, parsed_pos_len);
+        parsed_port[parsed_pos_len] = 0;
+        len = offset - 1; // limit to addr part
     }
+    size_t parsed_hostname_len;
     if (len >= 2 && host[0] == '[' && host[len - 1] == ']') {  // ipv6
         // strip braces
-        strncpy(parsed_hostname, host + 1, MIN(len - 2, parsed_hostname_size));
+        parsed_hostname_len = MIN(len - 2, parsed_hostname_size);
+        strncpy(parsed_hostname, host + 1, parsed_hostname_len);
         *parsed_family = AF_INET6;
     } else {
-        strncpy(parsed_hostname, host, MIN(len, parsed_hostname_size));
+        parsed_hostname_len = MIN(len, parsed_hostname_size);
+        strncpy(parsed_hostname, host, parsed_hostname_len);
         *parsed_family = 0;  // any
     }
+    parsed_hostname[parsed_hostname_len] = 0;
 }
 
 //ssize_t readexactly(int fd, void *buf, size_t nbyte) {

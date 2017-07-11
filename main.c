@@ -17,7 +17,7 @@
 #include "subflow.h"
 
 
-int quit = 0;
+static volatile int quit = 0;
 
 void sighandler(int p) {
     if (!quit)
@@ -40,7 +40,7 @@ void grow_subflows(subflow_state *active_subflows_state, int *active_subflows_co
     if (*active_subflows_count >= desired_subflows_count)
         return;
 
-    if (clock() - *last_fail < GROW_DELAY_AFTER_FAIL_SECONDS) {
+    if (*last_fail != 0 &&(clock() - *last_fail) / CLOCKS_PER_SEC < GROW_DELAY_AFTER_FAIL_SECONDS) {
         return;
     }
 
@@ -72,10 +72,11 @@ void grow_subflows(subflow_state *active_subflows_state, int *active_subflows_co
             *last_fail = clock();
             return;
         }
+        subflow_state * sf;
         if (client_proxy != NULL) {
-            add_subflow_proxy_waiting(active_subflows_state, active_subflows_count, childfd, active_tunnel_id);
+            sf = add_subflow_proxy_waiting(active_subflows_state, active_subflows_count, childfd, active_tunnel_id);
         } else {
-            subflow_state * sf = add_subflow_unk(active_subflows_state, active_subflows_count, childfd, active_tunnel_id, 1);
+            sf = add_subflow_unk(active_subflows_state, active_subflows_count, childfd, active_tunnel_id, 1);
 
             // I know, this doesn't feels right to do it here
             if (!send_client_greet(sf)) {
@@ -86,6 +87,9 @@ void grow_subflows(subflow_state *active_subflows_state, int *active_subflows_co
                 return;
             }
         }
+#ifdef DEBUG
+        printf("Created new subflow. tunnel id: %d\n", sf->tunnel_id);
+#endif
     }
 }
 
@@ -171,7 +175,7 @@ void run_forever(const char * udp_local_listen, const char *udp_local_dest,
 
     subflow_state *active_subflows_state = (subflow_state *) malloc(sizeof(subflow_state) * MAX_TUNNEL_CONNECTIONS);
     int active_subflows_count = 0;
-    clock_t last_fail = clock() - GROW_DELAY_AFTER_FAIL_SECONDS - 1;
+    clock_t last_fail = 0;  // clock() returns time since process start. see man 2 clock.
     int last_write_subflow = 0;
 
     char *udp_buf = (char *) malloc(BUFSIZE_UDP);
@@ -183,8 +187,12 @@ void run_forever(const char * udp_local_listen, const char *udp_local_dest,
     memset(&tcp_client, 0, sizeof(struct addrinfo));
     int server_tcp_sock_fd;
 
-    if (!is_client)
+    if (!is_client) {
         server_tcp_sock_fd = bind_server_tcp_socket(server_listen);
+#ifdef DEBUG
+        printf("Listening TCP on %s\n", server_listen);
+#endif
+    }
 
     if (is_client) {
         grow_subflows(active_subflows_state, &active_subflows_count,
@@ -195,7 +203,9 @@ void run_forever(const char * udp_local_listen, const char *udp_local_dest,
     }
 
     int local_udp_sock_fd = bind_local_udp(udp_local_listen, &udp_server_ai);
-
+#ifdef DEBUG
+        printf("Listening UDP on %s\n", udp_local_listen);
+#endif
     if (udp_local_dest != NULL) {
         udp_client_len = sizeof(udp_client);
         if (!resolve_dest_with_hints(udp_local_dest, &udp_server_ai,
@@ -296,6 +306,9 @@ void run_forever(const char * udp_local_listen, const char *udp_local_dest,
             if (FD_ISSET(server_tcp_sock_fd, &readfds)) {
                 int childfd = server_accept_client(server_tcp_sock_fd);
                 if (active_subflows_count >= MAX_TUNNEL_CONNECTIONS) {  // drop extra connections
+#ifdef DEBUG
+                    printf("Dropped as max subflows\n");
+#endif
                     close(childfd);
                 } else {
                     add_subflow_unk(active_subflows_state, &active_subflows_count, childfd, active_tunnel_id, is_client);
@@ -339,8 +352,11 @@ void run_forever(const char * udp_local_listen, const char *udp_local_dest,
 
             if (active_subflows_state[i].state != SS_READY) {
                 // drop hang subflows
-                if (clock() - active_subflows_state[i].connect_clock > SUBFLOW_INIT_DEADLINE_SECONDS) {
+                if ((clock() - active_subflows_state[i].connect_clock) / CLOCKS_PER_SEC > SUBFLOW_INIT_DEADLINE_SECONDS) {
                     close(active_subflows_state[i].sock_fd);
+#ifdef DEBUG
+                    printf("Dropped as hung subflow.\n");
+#endif
                     remove_subflow(active_subflows_state, &active_subflows_count, active_subflows_state[i].sock_fd);
                 }
             }
@@ -365,14 +381,22 @@ void print_help(char **argv) {
 
     fprintf(stderr, "\n");
     fprintf(stderr, "Usage: %s [-ldcsknph]\n", argv[0]);
+    fprintf(stderr, "\n");
+    fprintf(stderr, "\t-h  Print this help.\n");
+    fprintf(stderr, "\n");
+    fprintf(stderr, "Common options:\n");
     fprintf(stderr, "\t-l  <udp_listen_host>:<udp_listen_port> UDP address to listen.\n");
     fprintf(stderr, "\t-d  <addr>:<port> Where to send incoming UDP. If absent, will be determined from the first received packet.\n");
-    fprintf(stderr, "\t-c  <dest_host>:<dest_port> Client mode.\n");
-    fprintf(stderr, "\t-s  <listen_addr>:<listen_port> Server mode. TCP socket to listen on.\n");
     fprintf(stderr, "\t-k  <shared_secret> Common shared secret between client and server.\n");
+    fprintf(stderr, "\n");
+    fprintf(stderr, "Client options:\n");
+    fprintf(stderr, "\t-c  <dest_host>:<dest_port> Client mode.\n");
     fprintf(stderr, "\t-n  <client_connection_number> Number of TCP connections to maintain (not more than %d).\n", MAX_TUNNEL_CONNECTIONS);
     fprintf(stderr, "\t-p  <client_proxy_host>:<client_proxy_port> HTTP proxy to connect via (if needed).\n");
-    fprintf(stderr, "\t-h  Print this help.\n");
+    fprintf(stderr, "\n");
+    fprintf(stderr, "Server options:\n");
+    fprintf(stderr, "\t-s  <listen_addr>:<listen_port> Server mode. TCP socket to listen on.\n");
+    fprintf(stderr, "\n");
 }
 
 int main(int argc, char **argv) {
@@ -438,7 +462,7 @@ int main(int argc, char **argv) {
         }
     }
 
-    if (help >= 0) {
+    if (help) {
         print_help(argv);
         return 1;
     }
