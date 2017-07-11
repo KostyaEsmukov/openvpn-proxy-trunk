@@ -17,6 +17,7 @@
 
 
 int quit = 0;
+
 void sighandler(int p) {
     if (!quit)
         syslog(LOG_INFO, "Signal %d received, issuing clean shutdown\n", p);
@@ -27,7 +28,7 @@ void sighandler(int p) {
 }
 
 void grow_subflows(subflow_state *active_subflows_state, int *active_subflows_count,
-                   int desired_subflows_count, char * client_proxy, char * client_dest,
+                   int desired_subflows_count, char *client_proxy, char *client_dest,
                    clock_t *last_fail) {
 
     if (*active_subflows_count >= desired_subflows_count)
@@ -75,7 +76,7 @@ void grow_subflows(subflow_state *active_subflows_state, int *active_subflows_co
     }
 }
 
-int write_outgoing_datagram(char * buf, ssize_t len,
+int write_outgoing_datagram(char *buf, ssize_t len,
                             subflow_state *active_subflows_state, int active_subflows_count,
                             int *last_write_subflow,
                             fd_set *writefds) {
@@ -100,17 +101,25 @@ int write_outgoing_datagram(char * buf, ssize_t len,
     return 0;
 }
 
-void run_forever(int udp_local_listen, int is_client, const char * server_listen,
-                 const char * shared_secret,
-                 int client_conenctions, char * client_proxy, char * client_dest) {
+void run_forever(int udp_local_listen, char *udp_local_dest,
+                 int is_client, const char *server_listen,
+                 const char *shared_secret,
+                 int client_conenctions, char *client_proxy, char *client_dest) {
     uint32_t active_tunnel_id = secure_random();
     subflow_state *active_subflows_state = (subflow_state *) malloc(sizeof(subflow_state) * MAX_TUNNEL_CONNECTIONS);
     int active_subflows_count = 0;
     clock_t last_fail = clock() - GROW_DELAY_AFTER_FAIL_SECONDS - 1;
     int last_write_subflow = 0;
-    char * udp_buf = (char *)malloc(BUFSIZE_UDP);
-    struct sockaddr udp_client;
-    socklen_t udp_client_len;
+    char *udp_buf = (char *) malloc(BUFSIZE_UDP);
+    struct sockaddr_in udp_client;
+    socklen_t udp_client_len = 0;
+
+    if (udp_local_dest != NULL) {
+        udp_client.
+        if (!resolve_host(client_proxy, &si.sin_addr, &si.sin_port)) {
+            die("Unable to resolve local UDP dest host", errno);
+        }
+    }
 
     int server_tcp_sock_fd;
 
@@ -166,11 +175,25 @@ void run_forever(int udp_local_listen, int is_client, const char * server_listen
         }
         if (FD_ISSET(local_udp_sock_fd, &readfds)) {
             // recv always returns a single full datagram. see man 2 recv.
-            ssize_t len = recvfrom(
-                    local_udp_sock_fd,
-                    udp_buf + sizeof(udp_datagram_header),  // reserve space for header
-                    BUFSIZE_UDP - sizeof(udp_datagram_header),
-                    0, &udp_client, &udp_client_len);
+            ssize_t len;
+            if (udp_client_len <= 0) {
+                // we don't know destination yet - get it from that packet
+                udp_client_len = sizeof(udp_client);
+                len = recvfrom(
+                        local_udp_sock_fd,
+                        udp_buf + sizeof(udp_datagram_header),  // reserve space for header
+                        BUFSIZE_UDP - sizeof(udp_datagram_header),
+                        0,  // flags
+                        (struct sockaddr *) &udp_client, &udp_client_len);
+                if (len <= 0)  // we failed here - retry later on
+                    udp_client_len = 0;
+            } else {
+                len = recv(
+                        local_udp_sock_fd,
+                        udp_buf + sizeof(udp_datagram_header),  // reserve space for header
+                        BUFSIZE_UDP - sizeof(udp_datagram_header),
+                        0);
+            }
             if (len <= 0) {
                 if (errno != EAGAIN)
                     die("Local UDP recv failed", errno);
@@ -242,28 +265,32 @@ void print_help(char **argv) {
                    "via HTTP Proxy using CONNECT and tunnels UDP packets "
                    "through them.\n");
 
-    fprintf(stderr, "Usage: %s [-lcsknph]\n", argv[0]);
-    fprintf(stderr, "\t-l  Local UDP port to listen.\n");
-    fprintf(stderr, "\t-c  <addr>:<port> Client mode.\n");
-    fprintf(stderr, "\t-s  [<laddr>:]<lport> Server mode.\n");
+    fprintf(stderr, "Usage: %s [-ldcsknph]\n", argv[0]);
+    fprintf(stderr, "\t-l  <udp_listen_port> Local UDP port to listen.\n");
+    fprintf(stderr,
+            "\t-d  <addr>:<port> Where to send incoming UDP. If absent, will be determined from the first received packet.\n");
+    fprintf(stderr, "\t-c  <dest_host>:<dest_port> Client mode.\n");
+    fprintf(stderr, "\t-s  [<listen_addr>:]<listen_port> Server mode.\n");
     fprintf(stderr, "\t-k  <shared_secret> Common shared secret between client and server.\n");
-    fprintf(stderr, "\t-n  <client_connection_number> Number of TCP connections to maintain (not more than %d).\n", MAX_TUNNEL_CONNECTIONS);
+    fprintf(stderr, "\t-n  <client_connection_number> Number of TCP connections to maintain (not more than %d).\n",
+            MAX_TUNNEL_CONNECTIONS);
     fprintf(stderr, "\t-p  <client_proxy_host>:<client_proxy_port> HTTP proxy to connect via (if needed).\n");
     fprintf(stderr, "\t-h  Print this help.\n");
 }
 
 int main(int argc, char **argv) {
     int udp_local_listen = -1;
+    char *udp_local_dest = NULL;
     int is_client = -1;
-    char * shared_secret = NULL;
+    char *shared_secret = NULL;
     int client_conenctions = 1;
-    char * client_proxy = NULL;
-    char * client_dest = NULL;
-    char * server_listen = NULL;
+    char *client_proxy = NULL;
+    char *client_dest = NULL;
+    char *server_listen = NULL;
     int help = 0;
 
     int i;
-    while ((i = getopt(argc, argv, "l:c:s:k:n:p:h")) != -1) {
+    while ((i = getopt(argc, argv, "l:c:s:k:n:p:d:h")) != -1) {
         switch (i) {
             case 'l':
                 udp_local_listen = atoi(optarg);
@@ -284,6 +311,9 @@ int main(int argc, char **argv) {
                 break;
             case 'p':
                 client_proxy = strdup(optarg);
+                break;
+            case 'd':
+                udp_local_dest = strdup(optarg);
                 break;
             case 'h':
             default:
@@ -321,7 +351,8 @@ int main(int argc, char **argv) {
     signal(SIGTERM, &sighandler);
     signal(SIGHUP, &sighandler);
 
-    run_forever(udp_local_listen, is_client, server_listen,
+    run_forever(udp_local_listen, udp_local_dest,
+                is_client, server_listen,
                 shared_secret,
                 client_conenctions, client_proxy, client_dest);
 
