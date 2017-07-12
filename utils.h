@@ -21,5 +21,6 @@ void parse_host(const char *host,
                 char *parsed_port, size_t parsed_port_size,
                 int *parsed_family);
 
+time_t clock_seconds();
 
 #endif //OPENVPN_PROXY_TRUNK_UTILS_H

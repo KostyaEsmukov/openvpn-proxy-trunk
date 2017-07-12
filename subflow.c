@@ -29,7 +29,7 @@ subflow_state *_add_subflow(subflow_state *active_subflows_state,
     new_subflow->tunnel_id = active_tunnel_id;
     new_subflow->sock_fd = sock_fd;
     new_subflow->state = state;
-    new_subflow->connect_clock = clock();
+    new_subflow->connect_clock = clock_seconds();
 
     uint32_t * nonce;
     if (is_client) {

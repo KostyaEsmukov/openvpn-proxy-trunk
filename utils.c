@@ -11,15 +11,16 @@
 #include <string.h>
 #include <syslog.h>
 #include <unistd.h>
+#include <time.h>
 
-
+#include "log.h"
 #include "utils.h"
 
 
 void die(const char * msg, int errno_) {
-    fprintf(stderr, "%s\n", msg);
+    log(LOG_CRIT, "%s\n", msg);
     if (errno_ > 0)
-        fprintf(stderr, "%s\n", strerror(errno_));
+        log(LOG_CRIT, "%s\n", strerror(errno_));
     exit(1);
 }
 
@@ -113,4 +114,12 @@ uint32_t secure_random() {
     }
     close(fd);
     return res;
+}
+
+time_t clock_seconds() {
+    struct timespec t;
+    if (clock_gettime(CLOCK_MONOTONIC_RAW, &t) != 0) {
+        die("Unable to call clock_gettime", errno);
+    }
+    return t.tv_sec;
 }

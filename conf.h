@@ -17,8 +17,6 @@
 
 #define DEBUG 1
 
-#ifdef DEBUG
-#define syslog(priority, ...) printf(__VA_ARGS__)
-#endif
+#include "log.h"
 
 #endif //OPENVPN_PROXY_TRUNK_CONF_H

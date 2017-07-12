@@ -14,6 +14,7 @@
 
 #include "utils.h"
 #include "conf.h"
+#include "log.h"
 
 
 int bind_local_udp(const char *udp_listen_host, struct addrinfo * chosen_ai) {
@@ -29,7 +30,7 @@ int bind_local_udp(const char *udp_listen_host, struct addrinfo * chosen_ai) {
 
     int rc = getaddrinfo((char *) &hostname, (char *) &port, &hints, &res);
     if (rc != 0) {
-        fprintf(stderr, "Unable to resolve UDP bind address %s. (%d: %s)\n", hostname, rc, gai_strerror(rc));
+        log(LOG_INFO, "Unable to resolve UDP bind address %s. (%d: %s)\n", hostname, rc, gai_strerror(rc));
         exit(1);
     }
 
@@ -68,7 +69,7 @@ int bind_server_tcp_socket(const char *server_listen) {
 
     int rc = getaddrinfo((char *) &hostname, (char *) &port, &hints, &res);
     if (rc != 0) {
-        fprintf(stderr, "Unable to resolve TCP bind address %s. (%d: %s)\n", hostname, rc, gai_strerror(rc));
+        log(LOG_INFO, "Unable to resolve TCP bind address %s. (%d: %s)\n", hostname, rc, gai_strerror(rc));
         exit(1);
     }
 
@@ -107,7 +108,7 @@ int server_accept_client(int server_tcp_sock_fd) {
     int childfd = accept(server_tcp_sock_fd,
                          (struct sockaddr *) &clientaddr, &clientlen);
     if (childfd < 0) {
-        syslog(LOG_INFO, "ERROR on accept, skipping that connection. (%d: %s)", errno, strerror(errno));
+        log(LOG_INFO, "ERROR on accept, skipping that connection. (%d: %s)", errno, strerror(errno));
     }
 
     return childfd;
@@ -128,7 +129,7 @@ int resolve_dest_with_hints(const char *host, struct addrinfo *hints_,
 
     int rc = getaddrinfo((char *) &hostname, (char *) &port, &hints, &res);
     if (rc != 0) {
-        fprintf(stderr, "Unable to resolve address %s. (%d: %s)\n", host, rc, gai_strerror(rc));
+        log(LOG_INFO, "Unable to resolve address %s. (%d: %s)\n", host, rc, gai_strerror(rc));
         return 0;
     }
     for (p = res; p != NULL; p = p->ai_next) {
@@ -157,16 +158,21 @@ int resolve_dest_to_ai(const char *host, struct addrinfo *ai_res, int ai_socktyp
 
     int rc = getaddrinfo((char *) &hostname, (char *) &port, &hints, &res);
     if (rc != 0) {
-        fprintf(stderr, "Unable to resolve address %s. (%d: %s)\n", host, rc, gai_strerror(rc));
+        log(LOG_INFO, "Unable to resolve address %s. (%d: %s)\n", host, rc, gai_strerror(rc));
         return 0;
     }
 
     for (p = res; p != NULL; p = p->ai_next) {
+        if (p->ai_addr->sa_len == 0)
+            continue;
         if ((sock_fd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1)
             continue;
         close(sock_fd);
 
+        struct sockaddr * si = (struct sockaddr *) malloc(p->ai_addrlen);  // todo !! this is never free'd
+        memcpy(si, p->ai_addr, p->ai_addrlen);
         memcpy(ai_res, p, sizeof(struct addrinfo));
+        ai_res->ai_addr = si;
         freeaddrinfo(res);
         return 1;
     }

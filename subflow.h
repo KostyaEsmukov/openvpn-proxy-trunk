@@ -17,7 +17,7 @@ struct recv_buf {
 
 struct subflow_state {
     int sock_fd;
-    clock_t connect_clock;
+    time_t connect_clock;
     uint32_t tunnel_id;
     uint32_t client_nonce;
     uint32_t server_nonce;

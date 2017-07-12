@@ -10,20 +10,30 @@
 
 #include "prot.h"
 #include "utils.h"
+#include "log.h"
 
-unsigned char *hmac_sha256(const void *key, int keylen,
-                           const unsigned char *data, size_t datalen) {
-    return HMAC(EVP_sha256(), key, keylen, data, datalen, NULL, NULL);
+void hmac_sha256(const void *key, int keylen,
+                 const unsigned char *data, size_t datalen,
+                 unsigned char *result, unsigned int result_size) {
+    HMAC(EVP_sha256(), key, keylen, data, datalen, result, &result_size);
 }
 
 
-unsigned char * compute_hmac(subflow_state *subflow, const char prefix[2], const char *shared_secret) {
+void compute_hmac(subflow_state *subflow, const char prefix[3], const char *shared_secret,
+                  unsigned char * result, unsigned int result_size) {
     struct hmac_data hd;
-    strncpy((char *) &hd.prefix, (const char *)&prefix, 2);
+    memcpy((char *) &hd.prefix, prefix, 2);
     hd.tunnel_id = subflow->tunnel_id;
     hd.client_nonce = subflow->client_nonce;
     hd.server_nonce = subflow->server_nonce;
-    return hmac_sha256(shared_secret, strlen(shared_secret), (unsigned char *) &hd, sizeof(hd));
+    hmac_sha256(shared_secret, strlen(shared_secret),
+                (unsigned char *) &hd, sizeof(hd),
+                result, result_size);
+#ifdef DEBUG
+//    printf("hmac calculation\n");
+//    printf_bytes(&hd, sizeof(hd));
+//    printf_bytes(result, result_size);
+#endif
 }
 
 int send_client_greet(subflow_state *subflow) {
@@ -43,9 +53,7 @@ int send_server_greet(subflow_state *subflow, const char *shared_secret) {
     struct server_greet g;
     g.server_nonce = subflow->server_nonce;
 
-    unsigned char *hmac = compute_hmac(subflow, "s1", shared_secret);
-    memcpy((char *) &g.hmac, hmac, HMAC_LEN);
-    free(hmac);
+    compute_hmac(subflow, "s1", shared_secret, (unsigned char *) &g.hmac, HMAC_LEN);
 
     memcpy((char *) &buf + MAGIC_HEADER_LEN, &g, sizeof(g));
 
@@ -57,9 +65,7 @@ int send_client_ack(subflow_state *subflow, const char *shared_secret) {
     memcpy((char *) &buf, MAGIC_HEADER, MAGIC_HEADER_LEN);
     struct client_ack g;
 
-    unsigned char *hmac = compute_hmac(subflow, "c1", shared_secret);
-    memcpy((char *) &g.hmac, hmac, HMAC_LEN);
-    free(hmac);
+    compute_hmac(subflow, "c1", shared_secret, (unsigned char *) &g.hmac, HMAC_LEN);
 
     memcpy((char *) &buf + MAGIC_HEADER_LEN, &g, sizeof(g));
 
@@ -79,13 +85,13 @@ int process_proxy_connect(subflow_state *subflow, int *changed) {
 
     if (strncmp(subflow->buf_struct.buf, "HTTP/1.0 ", 9)
         && strncmp(subflow->buf_struct.buf, "HTTP/1.1 ", 9)) {
-        fprintf(stderr, "Invalid proxy response, expected HTTP/1.0");
+        log(LOG_INFO, "Invalid proxy response, expected HTTP/1.0");
         // todo ?? log what we got?
         return 0;
     }
 
     if (strncmp(subflow->buf_struct.buf + 9, "200", 3)) {
-        fprintf(stderr, "Invalid proxy response, not 200");
+        log(LOG_INFO, "Invalid proxy response, not 200");
         return 0;
     }
 
@@ -110,7 +116,7 @@ int process_server_unk(subflow_state *subflow, int *changed, const char *shared_
         return 1;  // not full response yet
 
     if (!is_valid_magic(subflow->buf_struct.buf)) {
-        fprintf(stderr, "Invalid magic in client_greet");
+        log(LOG_INFO, "Invalid magic in client_greet");
         return 0;
     }
     assert(subflow->buf_struct.pos >= MAGIC_HEADER_LEN + sizeof(struct client_greet));
@@ -119,7 +125,7 @@ int process_server_unk(subflow_state *subflow, int *changed, const char *shared_
     if (subflow->tunnel_id == 0) {
         subflow->tunnel_id = g->tunnel_id;
     } else if (subflow->tunnel_id != g->tunnel_id) {
-        fprintf(stderr, "Rejected client with different tunnel id");
+        log(LOG_INFO, "Rejected client with different tunnel id");
         return 0;
     }
     subflow->client_nonce = g->client_nonce;
@@ -141,7 +147,7 @@ int process_client_unk(subflow_state *subflow, int *changed, const char *shared_
         return 1;  // not full response yet
 
     if (!is_valid_magic(subflow->buf_struct.buf)) {
-        fprintf(stderr, "Invalid magic in server_greet");
+        log(LOG_INFO, "Invalid magic in server_greet");
         return 0;
     }
 
@@ -149,13 +155,13 @@ int process_client_unk(subflow_state *subflow, int *changed, const char *shared_
     struct server_greet *g = (struct server_greet *) (subflow->buf_struct.buf + MAGIC_HEADER_LEN);
 
     subflow->server_nonce = g->server_nonce;
-    unsigned char *our_hmac = compute_hmac(subflow, "s1", shared_secret);
-    if (memcmp(our_hmac, &g->hmac, HMAC_LEN) != 0) {
-        fprintf(stderr, "hmac mismatch in server_greet");
-        free(our_hmac);
+
+    unsigned char our_hmac[HMAC_LEN];
+    compute_hmac(subflow, "s1", shared_secret, (unsigned char *) &our_hmac, HMAC_LEN);
+    if (memcmp(&our_hmac, &g->hmac, HMAC_LEN) != 0) {
+        log(LOG_INFO, "hmac mismatch in server_greet");
         return 0;
     }
-    free(our_hmac);
 
     // okay, we are good with this server. tell'em that
 
@@ -174,20 +180,19 @@ int process_server_greeted(subflow_state *subflow, int *changed, const char *sha
         return 1;  // not full response yet
 
     if (!is_valid_magic(subflow->buf_struct.buf)) {
-        fprintf(stderr, "Invalid magic in client_ack");
+        log(LOG_INFO, "Invalid magic in client_ack");
         return 0;
     }
 
     assert(subflow->buf_struct.pos >= MAGIC_HEADER_LEN + sizeof(struct client_ack));
     struct client_ack *g = (struct client_ack *) (subflow->buf_struct.buf + MAGIC_HEADER_LEN);
 
-    unsigned char *our_hmac = compute_hmac(subflow, "c1", shared_secret);
-    if (memcmp(our_hmac, &g->hmac, HMAC_LEN) != 0) {
-        fprintf(stderr, "hmac mismatch in client_ack");
-        free(our_hmac);
+    unsigned char our_hmac[HMAC_LEN];
+    compute_hmac(subflow, "c1", shared_secret, (unsigned char *) &our_hmac, HMAC_LEN);
+    if (memcmp(&our_hmac, &g->hmac, HMAC_LEN) != 0) {
+        log(LOG_INFO, "hmac mismatch in client_ack");
         return 0;
     }
-    free(our_hmac);
 
     // okay, we are good with this client too. start sending/receiving datagrams
 
@@ -200,8 +205,9 @@ int process_server_greeted(subflow_state *subflow, int *changed, const char *sha
 
 // returns false if we are not good anymore - this subflow should be closed
 int process_negotiation_buffer(subflow_state *subflow, int is_client, const char *shared_secret) {
-    int changed = 0;
+    int changed;
     do {
+        changed = 0;
         switch (subflow->state) {
             case SS_PROXY_RESPONSE_WAITING:
                 assert(is_client);
@@ -221,6 +227,8 @@ int process_negotiation_buffer(subflow_state *subflow, int is_client, const char
                 assert(!is_client);
                 if (!process_server_greeted(subflow, &changed, shared_secret))
                     return 0;
+                break;
+            case SS_READY:
                 break;
             default:
                 assert(0);

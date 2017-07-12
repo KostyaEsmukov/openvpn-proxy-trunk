@@ -3,7 +3,6 @@
 //
 
 #include <arpa/inet.h>
-#include <errno.h>
 #include <string.h>
 #include <stdio.h>
 #include <netdb.h>
