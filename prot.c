@@ -2,10 +2,11 @@
 // Created by Kostya on 10/07/2017.
 //
 
+#define _GNU_SOURCE
+#include <string.h>
 #include <syslog.h>
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
-#include <string.h>
 #include <assert.h>
 
 #include "prot.h"
@@ -81,7 +82,7 @@ int process_proxy_connect(subflow_state *subflow, int *changed) {
     byte *rnrn = memmem(subflow->buf_struct.buf, subflow->buf_struct.pos, "\r\n\r\n", 4);
     if (rnrn == NULL)
         return 1; // not full response yet
-    size_t offset = (size_t) (rnrn - subflow->buf_struct.buf) + 4; // 4 - \r\n\r\n
+    size_t offset = rnrn - subflow->buf_struct.buf + 4; // 4 - \r\n\r\n
 
     if (memcmp(subflow->buf_struct.buf, "HTTP/1.0 ", 9)
         && memcmp(subflow->buf_struct.buf, "HTTP/1.1 ", 9)) {
