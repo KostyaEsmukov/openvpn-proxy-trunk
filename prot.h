@@ -89,7 +89,7 @@ typedef struct udp_datagram_header udp_datagram_header;
 // hmac data
 
 struct __attribute__((__packed__)) hmac_data {
-    char prefix [2];  // cl - client, se - server
+    char prefix [2];  // c1 - client, s1 - server
     uint32_t tunnel_id;
     uint32_t client_nonce;
     uint32_t server_nonce;

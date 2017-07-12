@@ -188,7 +188,7 @@ void run_forever(const char * udp_local_listen, const char *udp_local_dest,
 
     byte *udp_buf = (byte *) malloc(BUFSIZE_UDP);
     struct addrinfo udp_server_ai;  // used for resolving dest UDP
-    struct sockaddr_storage udp_client;  // refreshed each time of not set from -d commandline flag
+    struct sockaddr_storage udp_client;  // refreshed each time if not set from the `-d` commandline flag
     socklen_t udp_client_len = 0;  // 0 - unknown yet
 
     struct addrinfo tcp_client;  // stored only once.
@@ -432,13 +432,15 @@ void run_forever(const char * udp_local_listen, const char *udp_local_dest,
         }
     }
 
-    // cleanup
-    for (int i = 0; i < active_subflows_count; i++) {
-        close(active_subflows_state[i].sock_fd);
-    }
+    // todo ?? (graceful shutdown): drain write buffers before closing sockets
+
     close(local_udp_sock_fd);
     if (!is_client) {
         close(server_tcp_sock_fd);
+    }
+    // cleanup
+    for (int i = 0; i < active_subflows_count; i++) {
+        close(active_subflows_state[i].sock_fd);
     }
     free(active_subflows_state);
     free(udp_buf);
@@ -553,9 +555,11 @@ int main(int argc, char **argv) {
                 client_conenctions,
                 client_proxy, client_dest);
 
+    free(udp_local_listen);
+    free(udp_local_dest);
     free(shared_secret);
     free(client_proxy);
+    free(client_dest);
     free(server_listen);
-
     return 0;
 }
