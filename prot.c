@@ -22,7 +22,7 @@ void hmac_sha256(const void *key, int keylen,
 void compute_hmac(subflow_state *subflow, const char prefix[3], const char *shared_secret,
                   unsigned char * result, unsigned int result_size) {
     struct hmac_data hd;
-    memcpy((char *) &hd.prefix, prefix, 2);
+    memcpy((byte *) &hd.prefix, prefix, 2);
     hd.tunnel_id = subflow->tunnel_id;
     hd.client_nonce = subflow->client_nonce;
     hd.server_nonce = subflow->server_nonce;
@@ -37,37 +37,37 @@ void compute_hmac(subflow_state *subflow, const char prefix[3], const char *shar
 }
 
 int send_client_greet(subflow_state *subflow) {
-    char buf[CLIENT_GREET_LEN];
-    memcpy((char *) &buf, MAGIC_HEADER, MAGIC_HEADER_LEN);
+    byte buf[CLIENT_GREET_LEN];
+    memcpy((byte *) &buf, MAGIC_HEADER, MAGIC_HEADER_LEN);
     struct client_greet g;
     g.tunnel_id = subflow->tunnel_id;
     g.client_nonce = subflow->client_nonce;
-    memcpy((char *) &buf + MAGIC_HEADER_LEN, &g, sizeof(g));
+    memcpy((byte *) &buf + MAGIC_HEADER_LEN, &g, sizeof(g));
 
     return sendexactly(subflow->sock_fd, &buf, CLIENT_GREET_LEN) > 0;
 }
 
 int send_server_greet(subflow_state *subflow, const char *shared_secret) {
-    char buf[SERVER_GREET_LEN];
-    memcpy((char *) &buf, MAGIC_HEADER, MAGIC_HEADER_LEN);
+    byte buf[SERVER_GREET_LEN];
+    memcpy((byte *) &buf, MAGIC_HEADER, MAGIC_HEADER_LEN);
     struct server_greet g;
     g.server_nonce = subflow->server_nonce;
 
     compute_hmac(subflow, "s1", shared_secret, (unsigned char *) &g.hmac, HMAC_LEN);
 
-    memcpy((char *) &buf + MAGIC_HEADER_LEN, &g, sizeof(g));
+    memcpy((byte *) &buf + MAGIC_HEADER_LEN, &g, sizeof(g));
 
     return sendexactly(subflow->sock_fd, &buf, SERVER_GREET_LEN) > 0;
 }
 
 int send_client_ack(subflow_state *subflow, const char *shared_secret) {
-    char buf[CLIENT_ACK_LEN];
-    memcpy((char *) &buf, MAGIC_HEADER, MAGIC_HEADER_LEN);
+    byte buf[CLIENT_ACK_LEN];
+    memcpy((byte *) &buf, MAGIC_HEADER, MAGIC_HEADER_LEN);
     struct client_ack g;
 
     compute_hmac(subflow, "c1", shared_secret, (unsigned char *) &g.hmac, HMAC_LEN);
 
-    memcpy((char *) &buf + MAGIC_HEADER_LEN, &g, sizeof(g));
+    memcpy((byte *) &buf + MAGIC_HEADER_LEN, &g, sizeof(g));
 
     return sendexactly(subflow->sock_fd, &buf, CLIENT_ACK_LEN) > 0;
 }
@@ -78,19 +78,19 @@ int process_proxy_connect(subflow_state *subflow, int *changed) {
      */
 
     *changed = 0;
-    char *rnrn = memmem(subflow->buf_struct.buf, subflow->buf_struct.pos, "\r\n\r\n", 4);
+    byte *rnrn = memmem(subflow->buf_struct.buf, subflow->buf_struct.pos, "\r\n\r\n", 4);
     if (rnrn == NULL)
         return 1; // not full response yet
-    size_t offset = rnrn - subflow->buf_struct.buf + 4;
+    size_t offset = (size_t) (rnrn - subflow->buf_struct.buf) + 4; // 4 - \r\n\r\n
 
-    if (strncmp(subflow->buf_struct.buf, "HTTP/1.0 ", 9)
-        && strncmp(subflow->buf_struct.buf, "HTTP/1.1 ", 9)) {
+    if (memcmp(subflow->buf_struct.buf, "HTTP/1.0 ", 9)
+        && memcmp(subflow->buf_struct.buf, "HTTP/1.1 ", 9)) {
         log(LOG_INFO, "Invalid proxy response, expected HTTP/1.0");
         // todo ?? log what we got?
         return 0;
     }
 
-    if (strncmp(subflow->buf_struct.buf + 9, "200", 3)) {
+    if (memcmp(subflow->buf_struct.buf + 9, "200", 3)) {
         log(LOG_INFO, "Invalid proxy response, not 200");
         return 0;
     }
@@ -103,8 +103,16 @@ int process_proxy_connect(subflow_state *subflow, int *changed) {
     return send_client_greet(subflow);
 }
 
-int is_valid_magic(char * buf) {
-    return memcmp(buf, MAGIC_HEADER, MAGIC_HEADER_LEN) == 0;
+int is_valid_magic(byte * buf) {
+    int res = memcmp(buf, MAGIC_HEADER, MAGIC_HEADER_LEN) == 0;
+#ifdef DEBUG
+    if (!res) {
+        printf("magic mismatch. received vs expected:\n");
+        printf_bytes(buf, MAGIC_HEADER_LEN);
+        printf_bytes(MAGIC_HEADER, MAGIC_HEADER_LEN);
+    }
+#endif
+    return res;
 }
 
 int process_server_unk(subflow_state *subflow, int *changed, const char *shared_secret) {

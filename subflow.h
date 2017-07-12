@@ -10,9 +10,11 @@ enum ss_state {
 };
 typedef enum ss_state ss_state;
 
+typedef unsigned char byte;
+
 struct recv_buf {
     size_t pos;
-    char * buf;
+    byte * buf;
 };
 
 struct subflow_state {

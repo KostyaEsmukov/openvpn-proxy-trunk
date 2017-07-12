@@ -95,7 +95,7 @@ void grow_subflows(subflow_state *active_subflows_state, int *active_subflows_co
     }
 }
 
-int write_outgoing_datagram(char *buf, size_t len,
+int write_outgoing_datagram(byte *buf, size_t len,
                             subflow_state *active_subflows_state, int active_subflows_count,
                             int *last_write_subflow,
                             fd_set *writefds) {
@@ -186,7 +186,7 @@ void run_forever(const char * udp_local_listen, const char *udp_local_dest,
     time_t last_fail = 0;
     int last_write_subflow = 0;
 
-    char *udp_buf = (char *) malloc(BUFSIZE_UDP);
+    byte *udp_buf = (byte *) malloc(BUFSIZE_UDP);
     struct addrinfo udp_server_ai;  // used for resolving dest UDP
     struct sockaddr_storage udp_client;  // refreshed each time of not set from -d commandline flag
     socklen_t udp_client_len = 0;  // 0 - unknown yet

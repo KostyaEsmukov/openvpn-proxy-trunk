@@ -74,11 +74,11 @@ struct __attribute__((__packed__)) client_greet {
 
 struct __attribute__((__packed__)) server_greet {
     uint32_t server_nonce;
-    char hmac[HMAC_LEN]; // "s1" tunnel_id client_nonce server_nonce
+    byte hmac[HMAC_LEN]; // "s1" tunnel_id client_nonce server_nonce
 };
 
 struct __attribute__((__packed__)) client_ack {
-    char hmac[HMAC_LEN]; // "c1" tunnel_id client_nonce server_nonce
+    byte hmac[HMAC_LEN]; // "c1" tunnel_id client_nonce server_nonce
 };
 
 struct __attribute__((__packed__)) udp_datagram_header {

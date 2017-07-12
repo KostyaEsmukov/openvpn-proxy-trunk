@@ -40,7 +40,7 @@ subflow_state *_add_subflow(subflow_state *active_subflows_state,
     *nonce = 0;
     while (*nonce == 0) *nonce = secure_random();
 
-    new_subflow->buf_struct.buf = (char *) malloc(BUFSIZE_TCP_RECV);
+    new_subflow->buf_struct.buf = (byte *) malloc(BUFSIZE_TCP_RECV);
     return new_subflow;
 }
 
@@ -75,6 +75,9 @@ void remove_subflow(subflow_state *active_subflows_state, int *active_subflows_c
 }
 
 void remove_from_buf(subflow_state *subflow, size_t offset) {
-    memmove(subflow->buf_struct.buf, subflow->buf_struct.buf + offset, subflow->buf_struct.pos - offset);
+    assert(subflow->buf_struct.pos >= offset);
+    if (subflow->buf_struct.pos > offset) {
+        memmove(subflow->buf_struct.buf, subflow->buf_struct.buf + offset, subflow->buf_struct.pos - offset);
+    }
     subflow->buf_struct.pos -= offset;
 }
