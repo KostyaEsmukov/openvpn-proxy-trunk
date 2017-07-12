@@ -22,7 +22,7 @@ subflow_state *_add_subflow(subflow_state *active_subflows_state,
                             uint32_t active_tunnel_id, int is_client) {
     assert(*active_subflows_count < MAX_TUNNEL_CONNECTIONS);
 
-    subflow_state * new_subflow = &active_subflows_state[(*active_subflows_count)++];
+    subflow_state *new_subflow = &active_subflows_state[(*active_subflows_count)++];
     memset(new_subflow, 0, sizeof(subflow_state));
 
     assert(!is_client || active_tunnel_id != 0);
@@ -31,7 +31,7 @@ subflow_state *_add_subflow(subflow_state *active_subflows_state,
     new_subflow->state = state;
     new_subflow->connect_clock = clock_seconds();
 
-    uint32_t * nonce;
+    uint32_t *nonce;
     if (is_client) {
         nonce = &new_subflow->client_nonce;
     } else {

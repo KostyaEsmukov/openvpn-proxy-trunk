@@ -36,7 +36,7 @@ void sighandler(int p) {
 void grow_subflows(subflow_state *active_subflows_state, int *active_subflows_count,
                    int desired_subflows_count,
                    const char *client_proxy, const char *client_dest,
-                   struct addrinfo * ai,
+                   struct addrinfo *ai,
                    time_t *last_fail, uint32_t active_tunnel_id) {
 
     if (*active_subflows_count >= desired_subflows_count)
@@ -74,7 +74,7 @@ void grow_subflows(subflow_state *active_subflows_state, int *active_subflows_co
             *last_fail = clock_seconds();
             return;
         }
-        subflow_state * sf;
+        subflow_state *sf;
         if (client_proxy != NULL) {
             sf = add_subflow_proxy_waiting(active_subflows_state, active_subflows_count, childfd, active_tunnel_id);
         } else {
@@ -120,7 +120,7 @@ int write_outgoing_datagram(byte *buf, size_t len,
     return 0;
 }
 
-int fill_tcp_buf(subflow_state * subflow) {
+int fill_tcp_buf(subflow_state *subflow) {
     ssize_t bufsize = BUFSIZE_TCP_RECV - subflow->buf_struct.pos;
     if (bufsize > 0) {
         int read = recv(
@@ -139,10 +139,10 @@ int fill_tcp_buf(subflow_state * subflow) {
     return 0;
 }
 
-int send_udp(subflow_state * subflow,
-              int local_udp_sock_fd,
-              struct sockaddr_storage * udp_client, socklen_t udp_client_len) {
-    udp_datagram_header * dh;
+int send_udp(subflow_state *subflow,
+             int local_udp_sock_fd,
+             struct sockaddr_storage *udp_client, socklen_t udp_client_len) {
+    udp_datagram_header *dh;
     ssize_t tail_size;
     size_t pos = 0;  // to iterate through datagrams in the buf
     int result = 1;  // 1 - ok, 0 - subflow should be closed
@@ -173,7 +173,7 @@ int send_udp(subflow_state * subflow,
     return result;
 }
 
-void run_forever(const char * udp_local_listen, const char *udp_local_dest,
+void run_forever(const char *udp_local_listen, const char *udp_local_dest,
                  int is_client, const char *server_listen,
                  const char *shared_secret,
                  int client_conenctions,
@@ -212,7 +212,7 @@ void run_forever(const char * udp_local_listen, const char *udp_local_dest,
 
     int local_udp_sock_fd = bind_local_udp(udp_local_listen, &udp_server_ai);
 #ifdef DEBUG
-        printf("Listening UDP on %s\n", udp_local_listen);
+    printf("Listening UDP on %s\n", udp_local_listen);
 #endif
     if (udp_local_dest != NULL) {
         udp_client_len = sizeof(udp_client);
@@ -338,7 +338,7 @@ void run_forever(const char * udp_local_listen, const char *udp_local_dest,
                     log(LOG_INFO, "ERROR in TCP write select", errno);
                 } else {
                     // select is OK, we've got our writefds.
-                    udp_datagram_header * header = (udp_datagram_header *) udp_buf;
+                    udp_datagram_header *header = (udp_datagram_header *) udp_buf;
                     header->datagram_len = len;
                     if (!write_outgoing_datagram(
                             udp_buf, len + sizeof(udp_datagram_header),
@@ -384,18 +384,20 @@ void run_forever(const char * udp_local_listen, const char *udp_local_dest,
                 if (active_subflows_state[i].buf_struct.pos != 0) {
                     if (active_subflows_state[i].state == SS_READY) {
                         if (!send_udp(&active_subflows_state[i],
-                                 local_udp_sock_fd,
-                                 &udp_client, udp_client_len)) {
+                                      local_udp_sock_fd,
+                                      &udp_client, udp_client_len)) {
                             log(LOG_INFO, "Dropping subflow due to failed local UDP send");
                             close(active_subflows_state[i].sock_fd);
-                            remove_subflow(active_subflows_state, &active_subflows_count, active_subflows_state[i].sock_fd);
+                            remove_subflow(active_subflows_state, &active_subflows_count,
+                                           active_subflows_state[i].sock_fd);
                             continue;
                         }
                     } else {
                         if (!process_negotiation_buffer(&active_subflows_state[i], is_client, shared_secret)) {
                             log(LOG_INFO, "Subflow protocol negotiation failed: (%d: %s)", errno, strerror(errno));
                             close(active_subflows_state[i].sock_fd);
-                            remove_subflow(active_subflows_state, &active_subflows_count, active_subflows_state[i].sock_fd);
+                            remove_subflow(active_subflows_state, &active_subflows_count,
+                                           active_subflows_state[i].sock_fd);
                             continue;
                         }
                         if (active_subflows_state[i].state == SS_READY) {

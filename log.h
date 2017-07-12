@@ -12,6 +12,6 @@
 void _log(const char *file, int line, const char *func,
           int syslog_priority, const char *fmt, ...);
 
-void printf_bytes(void * buf, size_t len);
+void printf_bytes(void *buf, size_t len);
 
 #endif //OPENVPN_PROXY_TRUNK_LOG_H

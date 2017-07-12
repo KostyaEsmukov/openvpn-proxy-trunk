@@ -89,17 +89,16 @@ typedef struct udp_datagram_header udp_datagram_header;
 // hmac data
 
 struct __attribute__((__packed__)) hmac_data {
-    char prefix [2];  // c1 - client, s1 - server
+    char prefix[2];  // c1 - client, s1 - server
     uint32_t tunnel_id;
     uint32_t client_nonce;
     uint32_t server_nonce;
 };
 
 
-int send_client_greet(subflow_state * subflow);
+int send_client_greet(subflow_state *subflow);
 
 int process_negotiation_buffer(subflow_state *subflow, int is_client, const char *shared_secret);
-
 
 
 #endif //OPENVPN_PROXY_TRUNK_PROT_H

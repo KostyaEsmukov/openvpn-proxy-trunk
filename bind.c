@@ -17,12 +17,12 @@
 #include "log.h"
 
 
-int bind_local_udp(const char *udp_listen_host, struct addrinfo * chosen_ai) {
+int bind_local_udp(const char *udp_listen_host, struct addrinfo *chosen_ai) {
     struct addrinfo hints, *res, *p;
     int sock_fd;
 
-    char hostname [120];
-    char port [10];
+    char hostname[120];
+    char port[10];
 
     memset(&hints, 0, sizeof(hints));
     hints.ai_socktype = SOCK_DGRAM;
@@ -60,8 +60,8 @@ int bind_server_tcp_socket(const char *server_listen) {
     int sock_fd;
     socklen_t clen;
 
-    char hostname [120];
-    char port [10];
+    char hostname[120];
+    char port[10];
 
     memset(&hints, 0, sizeof(hints));
     hints.ai_socktype = SOCK_STREAM;
@@ -117,8 +117,8 @@ int server_accept_client(int server_tcp_sock_fd) {
 int resolve_dest_with_hints(const char *host, struct addrinfo *hints_,
                             struct sockaddr *si_res, socklen_t *si_res_size) {
     struct addrinfo hints, *res, *p;
-    char hostname [120];
-    char port [10];
+    char hostname[120];
+    char port[10];
 
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = hints_->ai_family;
@@ -149,8 +149,8 @@ int resolve_dest_to_ai(const char *host, struct addrinfo *ai_res, int ai_socktyp
     struct addrinfo hints, *res, *p;
     int sock_fd;
 
-    char hostname [120];
-    char port [10];
+    char hostname[120];
+    char port[10];
 
     memset(&hints, 0, sizeof(hints));
     hints.ai_socktype = ai_socktype;
@@ -169,7 +169,7 @@ int resolve_dest_to_ai(const char *host, struct addrinfo *ai_res, int ai_socktyp
             continue;
         close(sock_fd);
 
-        struct sockaddr * si = (struct sockaddr *) malloc(p->ai_addrlen);  // todo !! this is never free'd
+        struct sockaddr *si = (struct sockaddr *) malloc(p->ai_addrlen);  // todo !! this is never free'd
         memcpy(si, p->ai_addr, p->ai_addrlen);
         memcpy(ai_res, p, sizeof(struct addrinfo));
         ai_res->ai_addr = si;

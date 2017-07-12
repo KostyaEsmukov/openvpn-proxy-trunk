@@ -11,7 +11,7 @@
 #include "subflow.h"
 
 
-int connect_directly(struct addrinfo * ai_dest) {
+int connect_directly(struct addrinfo *ai_dest) {
     int sock_fd;
     socklen_t clen;
 
@@ -30,7 +30,7 @@ int connect_directly(struct addrinfo * ai_dest) {
     return sock_fd;
 }
 
-int connect_via_proxy(struct addrinfo * ai_proxy, const char *dest) {
+int connect_via_proxy(struct addrinfo *ai_proxy, const char *dest) {
 
     int proxyfd = connect_directly(ai_proxy);
     if (proxyfd < 0)

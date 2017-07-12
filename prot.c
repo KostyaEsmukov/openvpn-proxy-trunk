@@ -21,7 +21,7 @@ void hmac_sha256(const void *key, int keylen,
 
 
 void compute_hmac(subflow_state *subflow, const char prefix[3], const char *shared_secret,
-                  unsigned char * result, unsigned int result_size) {
+                  unsigned char *result, unsigned int result_size) {
     struct hmac_data hd;
     memcpy((byte *) &hd.prefix, prefix, 2);
     hd.tunnel_id = subflow->tunnel_id;
@@ -104,7 +104,7 @@ int process_proxy_connect(subflow_state *subflow, int *changed) {
     return send_client_greet(subflow);
 }
 
-int is_valid_magic(byte * buf) {
+int is_valid_magic(byte *buf) {
     int res = memcmp(buf, MAGIC_HEADER, MAGIC_HEADER_LEN) == 0;
 #ifdef DEBUG
     if (!res) {

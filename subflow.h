@@ -14,7 +14,7 @@ typedef unsigned char byte;
 
 struct recv_buf {
     size_t pos;
-    byte * buf;
+    byte *buf;
 };
 
 struct subflow_state {

@@ -28,9 +28,9 @@ void _log(const char *file, int line, const char *func,
 #endif
 }
 
-void printf_bytes(void * buf, size_t len) {
+void printf_bytes(void *buf, size_t len) {
     for (int i = 0; i < len; i++) {
-        printf("%02x ", (unsigned int)((unsigned char*)buf)[i]);
+        printf("%02x ", (unsigned int) ((unsigned char *) buf)[i]);
     }
     printf("\n");
 }
