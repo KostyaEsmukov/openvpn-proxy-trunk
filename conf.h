@@ -15,6 +15,8 @@
 #define BUFSIZE_UDP (2 << 16)  // from local udp
 #define BUFSIZE_TCP_RECV (2 << 16)  // from tcp to local udp, CONNECT proxy response, initial neg
 
+#define VERSION "0.1.0-dev"
+
 #define DEBUG 1
 
 #include "log.h"

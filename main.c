@@ -8,6 +8,7 @@
 #include <errno.h>
 #include <time.h>
 #include <netdb.h>
+#include <signal.h>
 
 #include "utils.h"
 #include "prot.h"
@@ -447,6 +448,7 @@ void print_help(char **argv) {
     printf("openvpn udp proxy trunk. Creates multiple TCP connections "
                    "via HTTP Proxy using CONNECT and tunnels UDP packets "
                    "through them.\n");
+    printf("Version " VERSION "\n");
 
     fprintf(stderr, "\n");
     fprintf(stderr, "Usage: %s [-ldcsknph]\n", argv[0]);
@@ -506,28 +508,32 @@ int main(int argc, char **argv) {
                 udp_local_dest = strdup(optarg);
                 break;
             case 'h':
+                help = 2;
+                break;
             default:
                 help = 1;
         }
     }
 
-    if (udp_local_listen == NULL) {
-        fprintf(stderr, "-l is required\n");
-        help = 1;
-    }
-    if (is_client < 0) {
-        fprintf(stderr, "either -c or -s is required\n");
-        help = 1;
-    }
-    if (shared_secret == NULL) {
-        fprintf(stderr, "-k is required\n");
-        help = 1;
-    }
-
-    if (is_client) {
-        if (client_conenctions > MAX_TUNNEL_CONNECTIONS) {
-            fprintf(stderr, "-n can't be more than %d\n", MAX_TUNNEL_CONNECTIONS);
+    if (help != 2) {  // don't validate args when help is asked
+        if (udp_local_listen == NULL) {
+            fprintf(stderr, "-l is required\n");
             help = 1;
+        }
+        if (is_client < 0) {
+            fprintf(stderr, "either -c or -s is required\n");
+            help = 1;
+        }
+        if (shared_secret == NULL) {
+            fprintf(stderr, "-k is required\n");
+            help = 1;
+        }
+
+        if (is_client) {
+            if (client_conenctions > MAX_TUNNEL_CONNECTIONS) {
+                fprintf(stderr, "-n can't be more than %d\n", MAX_TUNNEL_CONNECTIONS);
+                help = 1;
+            }
         }
     }
 

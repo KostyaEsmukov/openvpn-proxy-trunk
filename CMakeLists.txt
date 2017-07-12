@@ -1,9 +1,9 @@
 cmake_minimum_required(VERSION 3.7)
 project(openvpn_proxy_trunk)
 
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_C_STANDARD 99)
 
-find_package(openssl REQUIRED)
+find_package(OpenSSL REQUIRED)
 include_directories(${OPENSSL_INCLUDE_DIR})
 
 set(SOURCE_FILES log.c utils.c prot.c connect.c bind.c subflow.c main.c)

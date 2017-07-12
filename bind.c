@@ -163,7 +163,7 @@ int resolve_dest_to_ai(const char *host, struct addrinfo *ai_res, int ai_socktyp
     }
 
     for (p = res; p != NULL; p = p->ai_next) {
-        if (p->ai_addr->sa_len == 0)
+        if (p->ai_addrlen == 0)
             continue;
         if ((sock_fd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1)
             continue;
