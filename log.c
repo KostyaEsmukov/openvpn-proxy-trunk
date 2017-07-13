@@ -5,7 +5,6 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <syslog.h>
-#include <ntsid.h>
 #include <time.h>
 
 #include "conf.h"
