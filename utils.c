@@ -107,3 +107,15 @@ time_t clock_seconds() {
     }
     return t.tv_sec;
 }
+
+void write_pidfile(const char *pidfile_path) {
+    int pidfile_fd = open(pidfile_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (pidfile_fd < 0) {
+        die("Unable to create pid file", errno);
+    }
+
+    char pid[30];  // sizeof(pid_t)
+    snprintf(pid, 30, "%d\n", getpid());
+    write(pidfile_fd, pid, strlen(pid));
+    close(pidfile_fd);
+}

@@ -26,4 +26,6 @@ void parse_host(const char *host,
 
 time_t clock_seconds();
 
+void write_pidfile(const char *pidfile_path);
+
 #endif //OPENVPN_PROXY_TRUNK_UTILS_H

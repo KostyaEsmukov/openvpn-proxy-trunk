@@ -17,7 +17,9 @@
 
 #define VERSION "0.1.0-dev"
 
+#ifndef NDEBUG  // that is cmake's debug release. https://stackoverflow.com/a/8594122
 #define DEBUG 1
+#endif
 
 #include "log.h"
 

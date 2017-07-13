@@ -6,15 +6,16 @@
 #include <syslog.h>
 #include <arpa/inet.h>
 #include <errno.h>
-#include <time.h>
 #include <netdb.h>
 #include <signal.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 
+#include "conf.h"
+#include "log.h"
 #include "utils.h"
 #include "prot.h"
 #include "connect.h"
-#include "conf.h"
-#include "log.h"
 #include "bind.h"
 #include "subflow.h"
 
@@ -31,6 +32,43 @@ void sighandler(int p) {
 
     if (quit > 1)
         exit(1);
+}
+
+void daemonize() {
+    // how to daemonize:
+    // https://stackoverflow.com/a/3095624
+    int pid;
+    pid = fork();
+    if (pid == -1) {
+        die("Unable to fork", errno);
+    }
+    if (pid) {  // parent
+        exit(0);
+    }
+
+    logger_daemonize();
+
+    setsid();
+
+    pid = fork();
+    if (pid == -1) {
+        die("Unable to fork", errno);
+    }
+    if (pid) {  // parent
+        exit(0);
+    }
+    chdir("/");
+    umask(0);
+
+    // redirect stdin, stdout, stderr to /dev/null
+    int devnull_fd = open("/dev/null", O_RDWR);
+    if (devnull_fd >= 0) {
+        dup2(devnull_fd, 0);
+        dup2(devnull_fd, 1);
+        dup2(devnull_fd, 2);
+        if (devnull_fd > 2)
+            close(devnull_fd);
+    }
 }
 
 void grow_subflows(subflow_state *active_subflows_state, int *active_subflows_count,
@@ -177,7 +215,8 @@ void run_forever(const char *udp_local_listen, const char *udp_local_dest,
                  int is_client, const char *server_listen,
                  const char *shared_secret,
                  int client_conenctions,
-                 const char *client_proxy, const char *client_dest) {
+                 const char *client_proxy, const char *client_dest,
+                 const char *pidfile_path) {
     uint32_t active_tunnel_id = 0;  // 0 on server means it is unknown yet
     while (is_client && active_tunnel_id == 0) active_tunnel_id = secure_random();
 
@@ -197,9 +236,7 @@ void run_forever(const char *udp_local_listen, const char *udp_local_dest,
 
     if (!is_client) {
         server_tcp_sock_fd = bind_server_tcp_socket(server_listen);
-#ifdef DEBUG
-        printf("Listening TCP on %s\n", server_listen);
-#endif
+        log(LOG_INFO, "Listening TCP on %s", server_listen);
     }
 
     if (is_client) {
@@ -211,15 +248,17 @@ void run_forever(const char *udp_local_listen, const char *udp_local_dest,
     }
 
     int local_udp_sock_fd = bind_local_udp(udp_local_listen, &udp_server_ai);
-#ifdef DEBUG
-    printf("Listening UDP on %s\n", udp_local_listen);
-#endif
+    log(LOG_INFO, "Listening UDP on %s", udp_local_listen);
     if (udp_local_dest != NULL) {
         udp_client_len = sizeof(udp_client);
         if (!resolve_dest_with_hints(udp_local_dest, &udp_server_ai,
                                      (struct sockaddr *) &udp_client, &udp_client_len)) {
             die("Unable to resolve local UDP dest host", errno);
         }
+    }
+
+    if (pidfile_path != NULL) {
+        write_pidfile(pidfile_path);
     }
 
     fd_set readfds, errorfds, zerofds;
@@ -443,6 +482,7 @@ void run_forever(const char *udp_local_listen, const char *udp_local_dest,
     // cleanup
     for (int i = 0; i < active_subflows_count; i++) {
         close(active_subflows_state[i].sock_fd);
+        // todo ?? free buffer?
     }
     free(active_subflows_state);
     free(udp_buf);
@@ -463,6 +503,8 @@ void print_help(char **argv) {
     fprintf(stderr, "\t-l  <udp_listen_host>:<udp_listen_port> UDP address to listen.\n");
     fprintf(stderr, "\t-d  <addr>:<port> Where to send incoming UDP. If absent, will be determined from the first received packet.\n");
     fprintf(stderr, "\t-k  <shared_secret> Common shared secret between client and server.\n");
+    fprintf(stderr, "\t-b  Daemonize.\n");
+    fprintf(stderr, "\t-P  <pidfile> Create pidfile upon successful start.\n");
     fprintf(stderr, "\n");
     fprintf(stderr, "Client options:\n");
     fprintf(stderr, "\t-c  <dest_host>:<dest_port> Client mode.\n");
@@ -483,10 +525,12 @@ int main(int argc, char **argv) {
     char *client_proxy = NULL;
     char *client_dest = NULL;
     char *server_listen = NULL;
+    char *pidfile_path = NULL;
+    int background = 0;
     int help = 0;
 
     int i;
-    while ((i = getopt(argc, argv, "l:c:s:k:n:p:d:h")) != -1) {
+    while ((i = getopt(argc, argv, "l:c:s:k:n:p:d:bP:h")) != -1) {
         switch (i) {
             case 'l':
                 udp_local_listen = strdup(optarg);
@@ -510,6 +554,12 @@ int main(int argc, char **argv) {
                 break;
             case 'd':
                 udp_local_dest = strdup(optarg);
+                break;
+            case 'b':
+                background = 1;
+                break;
+            case 'P':
+                pidfile_path = strdup(optarg);
                 break;
             case 'h':
                 help = 2;
@@ -546,6 +596,11 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    if (background) {
+        daemonize();
+    }
+    umask(0);
+
     signal(SIGPIPE, SIG_IGN);
     signal(SIGINT, &sighandler);
     signal(SIGTERM, &sighandler);
@@ -555,7 +610,11 @@ int main(int argc, char **argv) {
                 is_client, server_listen,
                 shared_secret,
                 client_conenctions,
-                client_proxy, client_dest);
+                client_proxy, client_dest,
+                pidfile_path);
+
+    if (pidfile_path != NULL)
+        unlink(pidfile_path);
 
     free(udp_local_listen);
     free(udp_local_dest);
@@ -563,5 +622,7 @@ int main(int argc, char **argv) {
     free(client_proxy);
     free(client_dest);
     free(server_listen);
+    free(pidfile_path);
+
     return 0;
 }
