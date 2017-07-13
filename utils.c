@@ -75,6 +75,8 @@ ssize_t sendexactly(int fd, void *buf, size_t nbyte) {
         if ((i = send(fd, buf + buf_pos, nbyte - buf_pos, 0)) < 0) {
             if (errno == EAGAIN)
                 continue;
+            // todo EWOULDBLOCK
+            // todo EINTR
             return i;
         }
         buf_pos += i;

@@ -10,6 +10,7 @@
 #include <signal.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <netinet/tcp.h>
 
 #include "conf.h"
 #include "log.h"
@@ -173,6 +174,15 @@ int fill_tcp_buf(subflow_state *subflow) {
             return 2;
         }
         subflow->buf_struct.pos += read;
+
+        // immediately send TCP ACK
+        // https://stackoverflow.com/a/1615591
+        // https://github.com/shazow/urllib3/issues/746
+#ifdef TCP_QUICKACK
+        socklen_t clen = 1;
+        setsockopt(subflow->sock_fd, IPPROTO_TCP, TCP_QUICKACK, &clen, sizeof(clen));
+#endif
+
     } // else - no space in buffer. it should be drained first
     return 0;
 }

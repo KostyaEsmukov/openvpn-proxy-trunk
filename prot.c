@@ -92,9 +92,9 @@ int process_proxy_connect(subflow_state *subflow, int *changed) {
     }
 
     if (memcmp(subflow->buf_struct.buf + 9, "200", 3)) {
-        char resp[100];
+        byte resp[100];
         byte *rn = memmem(subflow->buf_struct.buf, subflow->buf_struct.pos, "\r\n", 2);
-        strncpy(resp, subflow->buf_struct.buf + 9, MIN(100, rn - subflow->buf_struct.buf - 9));
+        memcpy(resp, subflow->buf_struct.buf + 9, MIN(100, rn - subflow->buf_struct.buf - 9));
         log(LOG_INFO, "Invalid proxy response, not 200: %s", resp);
         return 0;
     }

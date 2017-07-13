@@ -6,6 +6,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <netdb.h>
+#include <netinet/tcp.h>
 
 #include "utils.h"
 #include "subflow.h"
@@ -21,6 +22,13 @@ int connect_directly(struct addrinfo *ai_dest) {
 
     clen = 1;
     setsockopt(sock_fd, SOL_SOCKET, SO_REUSEADDR, &clen, sizeof(clen));
+
+    // disable nagle's algo
+    // https://stackoverflow.com/q/7286592
+    // https://github.com/shazow/urllib3/issues/746
+    // https://en.wikipedia.org/wiki/Nagle%27s_algorithm
+    clen = 1;
+    setsockopt(sock_fd, IPPROTO_TCP, TCP_NODELAY, &clen, sizeof(clen));
 
     if (connect(sock_fd, ai_dest->ai_addr, ai_dest->ai_addrlen) == -1) {
         return -1;
