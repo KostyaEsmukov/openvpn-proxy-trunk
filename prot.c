@@ -54,7 +54,7 @@ int send_server_greet(subflow_state *subflow, const char *shared_secret) {
     struct server_greet g;
     g.server_nonce = subflow->server_nonce;
 
-    compute_hmac(subflow, "s1", shared_secret, (unsigned char *) &g.hmac, HMAC_LEN);
+    compute_hmac(subflow, "s1", shared_secret, g.hmac, HMAC_LEN);
 
     memcpy((byte *) &buf + MAGIC_HEADER_LEN, &g, sizeof(g));
 
@@ -66,7 +66,7 @@ int send_client_ack(subflow_state *subflow, const char *shared_secret) {
     memcpy((byte *) &buf, MAGIC_HEADER, MAGIC_HEADER_LEN);
     struct client_ack g;
 
-    compute_hmac(subflow, "c1", shared_secret, (unsigned char *) &g.hmac, HMAC_LEN);
+    compute_hmac(subflow, "c1", shared_secret, g.hmac, HMAC_LEN);
 
     memcpy((byte *) &buf + MAGIC_HEADER_LEN, &g, sizeof(g));
 
@@ -166,7 +166,7 @@ int process_client_unk(subflow_state *subflow, int *changed, const char *shared_
     subflow->server_nonce = g->server_nonce;
 
     unsigned char our_hmac[HMAC_LEN];
-    compute_hmac(subflow, "s1", shared_secret, (unsigned char *) &our_hmac, HMAC_LEN);
+    compute_hmac(subflow, "s1", shared_secret, our_hmac, HMAC_LEN);
     if (memcmp(&our_hmac, &g->hmac, HMAC_LEN) != 0) {
         log(LOG_INFO, "hmac mismatch in server_greet");
         return 0;
@@ -197,7 +197,7 @@ int process_server_greeted(subflow_state *subflow, int *changed, const char *sha
     struct client_ack *g = (struct client_ack *) (subflow->buf_struct.buf + MAGIC_HEADER_LEN);
 
     unsigned char our_hmac[HMAC_LEN];
-    compute_hmac(subflow, "c1", shared_secret, (unsigned char *) &our_hmac, HMAC_LEN);
+    compute_hmac(subflow, "c1", shared_secret, our_hmac, HMAC_LEN);
     if (memcmp(&our_hmac, &g->hmac, HMAC_LEN) != 0) {
         log(LOG_INFO, "hmac mismatch in client_ack");
         return 0;

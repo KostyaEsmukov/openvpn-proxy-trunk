@@ -26,9 +26,9 @@ int bind_local_udp(const char *udp_listen_host, struct addrinfo *chosen_ai) {
 
     memset(&hints, 0, sizeof(hints));
     hints.ai_socktype = SOCK_DGRAM;
-    parse_host(udp_listen_host, (char *) &hostname, 120, (char *) &port, 10, &hints.ai_family);
+    parse_host(udp_listen_host, hostname, 120, port, 10, &hints.ai_family);
 
-    int rc = getaddrinfo((char *) &hostname, (char *) &port, &hints, &res);
+    int rc = getaddrinfo(hostname, port, &hints, &res);
     if (rc != 0) {
         log(LOG_INFO, "Unable to resolve UDP bind address %s. (%d: %s)\n", hostname, rc, gai_strerror(rc));
         exit(1);
@@ -65,9 +65,9 @@ int bind_server_tcp_socket(const char *server_listen) {
 
     memset(&hints, 0, sizeof(hints));
     hints.ai_socktype = SOCK_STREAM;
-    parse_host(server_listen, (char *) &hostname, 120, (char *) &port, 10, &hints.ai_family);
+    parse_host(server_listen, hostname, 120, port, 10, &hints.ai_family);
 
-    int rc = getaddrinfo((char *) &hostname, (char *) &port, &hints, &res);
+    int rc = getaddrinfo(hostname, port, &hints, &res);
     if (rc != 0) {
         log(LOG_INFO, "Unable to resolve TCP bind address %s. (%d: %s)\n", hostname, rc, gai_strerror(rc));
         exit(1);
@@ -125,9 +125,9 @@ int resolve_dest_with_hints(const char *host, struct addrinfo *hints_,
     hints.ai_socktype = hints_->ai_socktype;
     hints.ai_protocol = hints_->ai_protocol;
 
-    parse_host(host, (char *) &hostname, 120, (char *) &port, 10, &hints.ai_family);
+    parse_host(host, hostname, 120, port, 10, &hints.ai_family);
 
-    int rc = getaddrinfo((char *) &hostname, (char *) &port, &hints, &res);
+    int rc = getaddrinfo(hostname, port, &hints, &res);
     if (rc != 0) {
         log(LOG_INFO, "Unable to resolve address %s. (%d: %s)\n", host, rc, gai_strerror(rc));
         return 0;
@@ -154,9 +154,9 @@ int resolve_dest_to_ai(const char *host, struct addrinfo *ai_res, int ai_socktyp
 
     memset(&hints, 0, sizeof(hints));
     hints.ai_socktype = ai_socktype;
-    parse_host(host, (char *) &hostname, 120, (char *) &port, 10, &hints.ai_family);
+    parse_host(host, hostname, 120, port, 10, &hints.ai_family);
 
-    int rc = getaddrinfo((char *) &hostname, (char *) &port, &hints, &res);
+    int rc = getaddrinfo(hostname, port, &hints, &res);
     if (rc != 0) {
         log(LOG_INFO, "Unable to resolve address %s. (%d: %s)\n", host, rc, gai_strerror(rc));
         return 0;

@@ -37,7 +37,7 @@ int connect_via_proxy(struct addrinfo *ai_proxy, const char *dest) {
         return proxyfd;
 
     char buf[128];
-    size_t len = snprintf((char *) &buf, 128, "CONNECT %s HTTP/1.0\r\n\r\n", dest);
+    size_t len = snprintf(buf, 128, "CONNECT %s HTTP/1.0\r\n\r\n", dest);
     if (sendexactly(proxyfd, &buf, len) < 0) {
         return -1;
     }
