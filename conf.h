@@ -15,7 +15,7 @@
 #define BUFSIZE_UDP (2 << 16)  // from local udp
 #define BUFSIZE_TCP_RECV (2 << 16)  // from tcp to local udp, CONNECT proxy response, initial neg
 
-#define VERSION "0.1.0-dev"
+#define VERSION "0.2.0-dev"
 
 #ifndef NDEBUG  // that is cmake's debug release. https://stackoverflow.com/a/8594122
 #define DEBUG 1
