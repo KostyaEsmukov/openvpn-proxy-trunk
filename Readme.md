@@ -14,5 +14,14 @@ The goal is to overcome bandwidth capping of a single TCP connection.
 ### debian
 
     apt install build-essentials cmake extra-cmake-modules libssl-dev
-    cmake .
+    cmake -DCMAKE_BUILD_TYPE=Release .
     make
+    sudo cp openvpn_proxy_trunk /usr/local/bin/
+
+### centos 7
+
+    yum install cmake3 gcc gcc-c++ make openssl-devel
+    cmake3 -DCMAKE_BUILD_TYPE=Release .
+    make
+    sudo cp openvpn_proxy_trunk /usr/local/bin/
+
