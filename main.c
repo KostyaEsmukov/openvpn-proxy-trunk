@@ -3,9 +3,14 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
+#include <syslog.h>
+#include <arpa/inet.h>
 #include <errno.h>
+#include <netdb.h>
+#include <signal.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <netinet/tcp.h>
 
 #include "conf.h"
 #include "run_forever.h"
